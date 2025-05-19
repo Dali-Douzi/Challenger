@@ -26,8 +26,17 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
-    const gameDoc = await Game.findById(team.game).select("formats name");
-    if (!gameDoc) return res.status(404).json({ message: "Game not found" });
+    let gameDoc = null;
+    if (mongoose.Types.ObjectId.isValid(team.game)) {
+      gameDoc = await Game.findById(team.game).select("formats name");
+    }
+    if (!gameDoc) {
+      gameDoc = await Game.findOne({ name: team.game }).select("formats name");
+    }
+    if (!gameDoc) {
+      return res.status(404).json({ message: "Game not found" });
+    }
+
     const validFormats = gameDoc.formats;
     if (!validFormats.includes(format)) {
       return res
@@ -41,33 +50,27 @@ router.post("/", protect, async (req, res) => {
       scheduledTime: new Date(scheduledTime).toISOString(),
       status: "open",
     });
+
     res.status(201).json(scrim);
   } catch (error) {
-    console.error(error);
+    console.error("🔥 Scrim-create Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// List open scrims for a specific team (match by game + rank)
-router.get("/team/:teamId", protect, async (req, res) => {
+router.get("/", protect, async (req, res) => {
   try {
-    const team = await Team.findById(req.params.teamId);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-    const scrims = await Scrim.find({ status: "open" })
-      .populate({
-        path: "teamA",
-        select: "name rank",
-        match: { game: team.game, rank: team.rank },
-      })
-      .select("format scheduledTime teamA");
-    res.json(scrims.filter((scrim) => scrim.teamA));
+    const scrims = await Scrim.find()
+      .populate("teamA", "name")
+      .select("format scheduledTime status teamA");
+    res.json(scrims);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error listing scrims:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-// Send a scrim request (cannot request own scrim or duplicate)
+// Send a scrim request (cannot request own scrim or duplicate) and auto-create chat
 router.post("/request/:scrimId", protect, async (req, res) => {
   try {
     const scrim = await Scrim.findById(req.params.scrimId);
@@ -86,8 +89,18 @@ router.post("/request/:scrimId", protect, async (req, res) => {
     if (scrim.requests.includes(teamId)) {
       return res.status(400).json({ message: "Scrim request already sent" });
     }
+
     scrim.requests.push(teamId);
     await scrim.save();
+
+    // Ensure a chat exists for this scrim
+    const ScrimChat = require("../models/ScrimChat");
+    let chat = await ScrimChat.findOne({ scrim: scrim._id });
+    if (!chat) {
+      chat = new ScrimChat({ scrim: scrim._id, messages: [] });
+      await chat.save();
+    }
+
     res.json({ message: "Scrim request sent", scrim });
   } catch (error) {
     console.error(error);
@@ -137,6 +150,7 @@ router.put("/accept/:scrimId", protect, async (req, res) => {
         message: "Only the team owner or a manager can accept a scrim request",
       });
     }
+
     const { teamId } = req.body;
     if (!scrim.requests.includes(teamId)) {
       return res

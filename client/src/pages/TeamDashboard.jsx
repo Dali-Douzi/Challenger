@@ -1,87 +1,91 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+// src/pages/TeamDashboard.jsx
+
+import React, { useEffect, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import {
   Box,
   Typography,
-  Paper,
-  Container,
   List,
   ListItem,
+  ListItemButton,
+  ListItemText,
+  CircularProgress,
+  Container,
+  Paper,
 } from "@mui/material";
-import React from "react";
 
 const TeamDashboard = () => {
-  const { id } = useParams(); // Dynamic team ID from URL
-  const [team, setTeam] = useState(null);
-  const [error, setError] = useState(null);
+  const token = localStorage.getItem("token");
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const fetchTeam = async () => {
+    (async () => {
       try {
-        const token = localStorage.getItem("token");
-        const res = await fetch(`http://localhost:4444/api/teams/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const res = await fetch("http://localhost:4444/api/teams/my", {
+          headers: { Authorization: `Bearer ${token}` },
         });
-
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.message || "Failed to fetch team");
+          const err = await res.json();
+          throw new Error(err.message || "Failed to fetch teams");
         }
-
         const data = await res.json();
-        setTeam(data);
+        setTeams(data);
       } catch (err) {
-        setError(err.message);
-        console.error("Error fetching team:", err);
+        console.error("Error fetching teams:", err);
+        setError("Error fetching your teams");
+      } finally {
+        setLoading(false);
       }
-    };
+    })();
+  }, [token]);
 
-    fetchTeam();
-  }, [id]);
-
-  if (error) {
+  if (loading) {
     return (
-      <Container maxWidth="sm">
-        <Paper sx={{ padding: 4, mt: 4 }}>
-          <Typography variant="h5">Team Dashboard</Typography>
-          <Typography color="error">{error}</Typography>
-        </Paper>
-      </Container>
-    );
-  }
-
-  if (!team) {
-    return (
-      <Container maxWidth="sm">
-        <Paper sx={{ padding: 4, mt: 4 }}>
-          <Typography variant="h5">Team Dashboard</Typography>
-          <Typography>Loading team details...</Typography>
-        </Paper>
-      </Container>
+      <Box sx={{ p: 4, textAlign: "center" }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
   return (
     <Container maxWidth="sm">
-      <Paper sx={{ padding: 4, mt: 4 }}>
-        <Typography variant="h4">{team.name}</Typography>
-        <Typography variant="h6">Game: {team.game}</Typography>
-        <Typography variant="h6">Rank: {team.rank}</Typography>
-        <Typography variant="h6">Team Code: {team.teamCode}</Typography>
-
-        <Typography variant="h6" sx={{ mt: 2 }}>
-          Members
+      <Box sx={{ p: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          Your Teams
         </Typography>
-        <List>
-          {team.members.map((m) => (
-            <ListItem key={m.user._id || m.user}>
-              {m.user.username || m.user.email || m.user} ({m.role})
-            </ListItem>
-          ))}
-        </List>
-      </Paper>
+
+        {error && (
+          <Typography color="error" gutterBottom>
+            {error}
+          </Typography>
+        )}
+
+        {!error && teams.length === 0 && (
+          <Typography>You haven’t created or joined any teams yet.</Typography>
+        )}
+
+        {!error && teams.length > 0 && (
+          <Paper>
+            <List>
+              {teams.map((team) => (
+                <ListItem key={team._id} disablePadding divider>
+                  <ListItemButton
+                    component={RouterLink}
+                    to={`/teams/${team._id}`}
+                  >
+                    <ListItemText
+                      primary={team.name}
+                      secondary={`Game: ${team.game} | Rank: ${team.rank}`}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </Paper>
+        )}
+      </Box>
     </Container>
   );
 };

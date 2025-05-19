@@ -13,6 +13,7 @@ import { ThemeProvider } from "@mui/material/styles";
 import theme from "./styles/theme";
 import React from "react";
 import { Box } from "@mui/material";
+import TeamProfile from "./pages/TeamProfile";
 
 function App() {
   return (
@@ -95,7 +96,8 @@ function App() {
                 </ProtectedRoute>
               }
             />
-
+            <Route path="/teams" element={<TeamDashboard />} />
+            <Route path="/teams/:id" element={<TeamProfile />} />
             {/* Optional 404 route */}
             <Route
               path="*"

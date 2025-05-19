@@ -1,194 +1,291 @@
-import { useState, useContext } from "react";
-import { AuthContext } from "../context/AuthContext";
+// src/components/ScrimDashboard.jsx
+
+import React, { useEffect, useState } from "react";
 import {
-  Button,
   Box,
-  Typography,
+  Button,
   Container,
-  Select,
-  MenuItem,
+  Typography,
   FormControl,
   InputLabel,
-  TextField,
+  Select,
+  MenuItem,
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemText,
+  Paper,
 } from "@mui/material";
-import React from "react";
 
 const ScrimDashboard = () => {
-  const { token } = useContext(AuthContext);
-  const [showForm, setShowForm] = useState(false);
-  const [format, setFormat] = useState("Best of 3");
-  const [selectedDay, setSelectedDay] = useState(""); // For selected day (today, tomorrow, etc.)
-  const [selectedTime, setSelectedTime] = useState(""); // For selected time
-  /* eslint-disable-next-line no-unused-vars */
-  const [scheduledTime, setScheduledTime] = useState(null); // The final combined time
+  const token = localStorage.getItem("token");
 
-  // Function to generate date options (today, tomorrow, and 5 days from now)
+  const [teams, setTeams] = useState([]);
+  const [games, setGames] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState("");
+  const [formats, setFormats] = useState([]);
+  const [format, setFormat] = useState("");
+  const [selectedDay, setSelectedDay] = useState("");
+  const [selectedTime, setSelectedTime] = useState("");
+  const [scrims, setScrims] = useState([]);
+  const [loading, setLoading] = useState({
+    teams: true,
+    games: true,
+    scrims: true,
+    posting: false,
+  });
+
+  // Fetch the user's teams
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:4444/api/teams/my", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setTeams(data);
+        if (data.length > 0) setSelectedTeam(data[0]._id);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading((l) => ({ ...l, teams: false }));
+      }
+    })();
+  }, [token]);
+
+  // Fetch all games (to get formats)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:4444/api/games");
+        const data = await res.json();
+        setGames(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading((l) => ({ ...l, games: false }));
+      }
+    })();
+  }, []);
+
+  // Derive formats for the selected team
+  useEffect(() => {
+    if (!selectedTeam || games.length === 0 || teams.length === 0) return;
+
+    const team = teams.find((t) => t._id === selectedTeam);
+    if (!team) return;
+
+    const game = games.find((g) => g.name === team.game || g._id === team.game);
+    const fmts = game?.formats || [];
+    setFormats(fmts);
+    if (fmts.length > 0) setFormat(fmts[0]);
+  }, [selectedTeam, teams, games]);
+
+  // Fetch all scrims
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:4444/api/scrims", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setScrims(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading((l) => ({ ...l, scrims: false }));
+      }
+    })();
+  }, [token]);
+
   const getDayOptions = () => {
-    const options = [];
+    const opts = ["Today", "Tomorrow"];
     const today = new Date();
-    options.push("Today");
-    for (let i = 1; i <= 5; i++) {
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + i);
-      options.push(tomorrow.toLocaleDateString()); // Format as desired (e.g., MM/DD/YYYY)
+    for (let i = 2; i <= 5; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      opts.push(d.toISOString().split("T")[0]);
     }
-    return options;
+    return opts;
   };
 
-  // Function to generate time options (00:00, 00:30, ..., 23:30)
   const getTimeOptions = () => {
     const times = [];
-    for (let hour = 0; hour < 24; hour++) {
-      const hourStr = hour < 10 ? `0${hour}` : `${hour}`;
-      for (let minute = 0; minute < 2; minute++) {
-        const minuteStr = minute === 0 ? "00" : "30";
-        times.push(`${hourStr}:${minuteStr}`);
-      }
+    for (let h = 0; h < 24; h++) {
+      const hh = h.toString().padStart(2, "0");
+      ["00", "30"].forEach((mm) => times.push(`${hh}:${mm}`));
     }
     return times;
   };
 
-  const handlePostScrim = async (event) => {
-    event.preventDefault();
-    if (!selectedDay || !selectedTime) {
-      return alert("Please select both day and time.");
+  const handlePostScrim = async (e) => {
+    e.preventDefault();
+    if (!selectedTeam || !selectedDay || !selectedTime || !format) {
+      alert("Please fill in all fields.");
+      return;
     }
 
+    const [h, m] = selectedTime.split(":").map(Number);
+    let dt = new Date();
+    if (selectedDay === "Tomorrow") {
+      dt.setDate(dt.getDate() + 1);
+    } else if (selectedDay !== "Today") {
+      dt = new Date(selectedDay);
+    }
+    dt.setHours(h, m, 0, 0);
+
+    setLoading((l) => ({ ...l, posting: true }));
     try {
-      // Combine the selected day and time into one Date object
-      const [hours, minutes] = selectedTime.split(":").map(Number);
-      const date = new Date();
-      if (selectedDay === "Today") {
-        date.setHours(hours, minutes, 0, 0);
-      } else if (selectedDay === "Tomorrow") {
-        date.setDate(date.getDate() + 1);
-        date.setHours(hours, minutes, 0, 0);
-      } else {
-        const selectedDate = new Date(selectedDay);
-        date.setFullYear(
-          selectedDate.getFullYear(),
-          selectedDate.getMonth(),
-          selectedDate.getDate()
-        );
-        date.setHours(hours, minutes, 0, 0);
-      }
-
-      setScheduledTime(date); // Set the final scheduled time
-
-      console.log("Scheduled time:", date); // Debugging the scheduled time
-
-      // Log the token for debugging
-      console.log("Token:", token);
-
-      // Ensure the token is correctly passed
       const res = await fetch("http://localhost:4444/api/scrims", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // Make sure token is passed
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ format, scheduledTime: date }),
+        body: JSON.stringify({
+          teamId: selectedTeam,
+          format,
+          scheduledTime: dt.toISOString(),
+        }),
       });
-
-      if (res.ok) {
-        alert("Scrim posted!");
-        setShowForm(false);
-        setFormat("Best of 3");
-        setSelectedDay("");
-        setSelectedTime("");
-        setScheduledTime(null);
-      } else {
-        const data = await res.json();
-        alert(data.message || "Failed to post scrim");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to post scrim");
       }
+      // reset form
+      setSelectedDay("");
+      setSelectedTime("");
+      // refresh scrims
+      const refresh = await fetch("http://localhost:4444/api/scrims", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setScrims(await refresh.json());
     } catch (err) {
-      console.error("Error posting scrim:", err);
-      alert("Server error");
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setLoading((l) => ({ ...l, posting: false }));
     }
   };
 
+  if (loading.teams || loading.games || loading.scrims) {
+    return (
+      <Box sx={{ p: 4, textAlign: "center" }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
-    <Container maxWidth="sm">
-      <Box sx={{ padding: 4 }}>
+    <Container maxWidth="md">
+      <Box sx={{ p: 4 }}>
         <Typography variant="h5" gutterBottom>
           Scrim Dashboard
         </Typography>
 
-        {!showForm ? (
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => setShowForm(true)}
+        <Paper sx={{ p: 2, mb: 4 }}>
+          <Typography variant="h6" gutterBottom>
+            Post New Scrim
+          </Typography>
+          <Box
+            component="form"
+            onSubmit={handlePostScrim}
+            sx={{ display: "grid", gap: 2 }}
           >
-            Post Scrim
-          </Button>
-        ) : (
-          <Box component="form" onSubmit={handlePostScrim} sx={{ mt: 4 }}>
-            {/* Format Dropdown */}
-            <FormControl fullWidth variant="filled" sx={{ mb: 2 }}>
-              <InputLabel>Format</InputLabel>
+            <FormControl fullWidth>
+              <InputLabel id="team-select-label">Team</InputLabel>
               <Select
+                labelId="team-select-label"
+                value={selectedTeam}
+                label="Team"
+                onChange={(e) => setSelectedTeam(e.target.value)}
+              >
+                {teams.map((t) => (
+                  <MenuItem key={t._id} value={t._id}>
+                    {t.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth>
+              <InputLabel id="format-select-label">Format</InputLabel>
+              <Select
+                labelId="format-select-label"
                 value={format}
-                onChange={(event) => setFormat(event.target.value)}
+                label="Format"
+                onChange={(e) => setFormat(e.target.value)}
               >
-                <MenuItem value="1 game">1 game</MenuItem>
-                <MenuItem value="2 games">2 games</MenuItem>
-                <MenuItem value="Best of 3">Best of 3</MenuItem>
-                <MenuItem value="Best of 5">Best of 5</MenuItem>
-                <MenuItem value="Best of 7">Best of 7</MenuItem>
-                <MenuItem value="5 games">5 games</MenuItem>
-                <MenuItem value="7 games">7 games</MenuItem>
+                {formats.map((f) => (
+                  <MenuItem key={f} value={f}>
+                    {f}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
 
-            {/* Day Dropdown */}
-            <FormControl fullWidth variant="filled" sx={{ mb: 2 }}>
-              <InputLabel>Day</InputLabel>
+            <FormControl fullWidth>
+              <InputLabel id="day-select-label">Day</InputLabel>
               <Select
+                labelId="day-select-label"
                 value={selectedDay}
-                onChange={(event) => setSelectedDay(event.target.value)}
+                label="Day"
+                onChange={(e) => setSelectedDay(e.target.value)}
               >
-                {getDayOptions().map((day) => (
-                  <MenuItem key={day} value={day}>
-                    {" "}
-                    {/* `day` as the key */}
-                    {day}
+                {getDayOptions().map((d) => (
+                  <MenuItem key={d} value={d}>
+                    {d}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
 
-            {/* Time Dropdown */}
-            <FormControl fullWidth variant="filled" sx={{ mb: 2 }}>
-              <InputLabel>Time</InputLabel>
+            <FormControl fullWidth>
+              <InputLabel id="time-select-label">Time</InputLabel>
               <Select
+                labelId="time-select-label"
                 value={selectedTime}
-                onChange={(event) => setSelectedTime(event.target.value)}
+                label="Time"
+                onChange={(e) => setSelectedTime(e.target.value)}
               >
-                {getTimeOptions().map((time) => (
-                  <MenuItem key={time} value={time}>
-                    {" "}
-                    {/* `time` as the key */}
-                    {time}
+                {getTimeOptions().map((t) => (
+                  <MenuItem key={t} value={t}>
+                    {t}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
 
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <Button type="submit" variant="contained" color="primary">
-                Submit
-              </Button>
-              <Button
-                type="button"
-                variant="outlined"
-                color="secondary"
-                onClick={() => setShowForm(false)}
-              >
-                Cancel
-              </Button>
-            </Box>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={loading.posting}
+            >
+              {loading.posting ? "Posting..." : "Post Scrim"}
+            </Button>
           </Box>
+        </Paper>
+
+        <Typography variant="h6" gutterBottom>
+          All Scrims
+        </Typography>
+        {scrims.length === 0 ? (
+          <Typography>No scrims found.</Typography>
+        ) : (
+          <List>
+            {scrims.map((s) => (
+              <ListItem key={s._id} divider>
+                <ListItemText
+                  primary={`${s.teamA?.name || "Unknown"} vs ${
+                    s.teamB?.name || "TBD"
+                  }`}
+                  secondary={`Format: ${s.format} | Time: ${new Date(
+                    s.scheduledTime
+                  ).toLocaleString()} | Status: ${s.status}`}
+                />
+              </ListItem>
+            ))}
+          </List>
         )}
       </Box>
     </Container>

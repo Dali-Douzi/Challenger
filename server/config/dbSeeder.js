@@ -1,4 +1,3 @@
-// dbSeeder.js
 const Game = require("../models/Game");
 
 const seedGames = async () => {
