@@ -47,7 +47,9 @@ router.post("/signup", async (req, res) => {
       _id: user._id,
       username: user.username,
       email: user.email,
-      token: jwt.sign({ id: user._id }, "your_jwt_secret", { expiresIn: "30d" }),
+      token: jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+        expiresIn: "30d",
+      }),
     });
   } catch (error) {
     console.error("🔥 Signup Error:", error);
@@ -61,20 +63,26 @@ router.post("/login", async (req, res) => {
 
   try {
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
     }
 
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid email or password" });
+    if (!user)
+      return res.status(400).json({ message: "Invalid email or password" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid email or password" });
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid email or password" });
 
     res.status(200).json({
       _id: user._id,
       username: user.username,
       email: user.email,
-      token: jwt.sign({ id: user._id }, "your_jwt_secret", { expiresIn: "30d" }),
+      token: jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+        expiresIn: "30d",
+      }),
     });
   } catch (error) {
     console.error("🔥 Login Error:", error);
@@ -95,7 +103,9 @@ router.put("/update", protect, async (req, res) => {
     if (newPassword) {
       const isMatch = await bcrypt.compare(currentPassword, user.password);
       if (!isMatch) {
-        return res.status(400).json({ message: "Current password is incorrect" });
+        return res
+          .status(400)
+          .json({ message: "Current password is incorrect" });
       }
       const salt = await bcrypt.genSalt(10);
       user.password = await bcrypt.hash(newPassword, salt);
