@@ -14,6 +14,8 @@ import theme from "./styles/theme";
 import React from "react";
 import { Box } from "@mui/material";
 import TeamProfile from "./pages/TeamProfile";
+import EditScrim from "./pages/EditScrim";
+import ScrimRequests from "./pages/ScrimRequests";
 
 function App() {
   return (
@@ -98,7 +100,11 @@ function App() {
             />
             <Route path="/teams" element={<TeamDashboard />} />
             <Route path="/teams/:id" element={<TeamProfile />} />
-            {/* Optional 404 route */}
+            <Route path="/scrims/edit" element={<EditScrim />} />
+            <Route
+              path="/scrims/:scrimId/requests"
+              element={<ScrimRequests />}
+            />
             <Route
               path="*"
               element={

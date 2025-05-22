@@ -13,6 +13,7 @@ const scrimRoutes = require("./routes/scrimRoutes");
 const scrimChatRoutes = require("./routes/scrimChatRoutes");
 const Scrim = require("./models/Scrim");
 const ScrimChat = require("./models/ScrimChat");
+const notificationRoutes = require("./routes/notificationRoutes");
 const app = express();
 
 dotenv.config();
@@ -39,6 +40,7 @@ app.use("/api/teams", teamRoutes);
 app.use("/api/games", gameRoutes);
 app.use("/api/scrims", scrimRoutes);
 app.use("/api/scrims/chat", scrimChatRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 const connectDB = async () => {
   try {
@@ -64,6 +66,8 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
+
+app.use("/api/notifications", notificationRoutes);
 
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;

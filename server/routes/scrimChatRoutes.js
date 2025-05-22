@@ -1,4 +1,3 @@
-// routes/scrimChatRoutes.js
 const express = require("express");
 const mongoose = require("mongoose");
 const ScrimChat = require("../models/ScrimChat");

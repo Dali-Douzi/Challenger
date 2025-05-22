@@ -27,7 +27,9 @@ router.post("/create", protect, async (req, res) => {
     }
 
     console.error("Team creation error:", err);
-    res.status(500).json({ message: "Error creating team", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Error creating team", error: err.message });
   }
 });
 
@@ -51,7 +53,10 @@ router.get("/:id", protect, async (req, res) => {
   const teamId = req.params.id;
 
   try {
-    const team = await Team.findById(teamId).populate("members.user", "username email");
+    const team = await Team.findById(teamId).populate(
+      "members.user",
+      "username email"
+    );
     if (!team) return res.status(404).json({ message: "Team not found" });
 
     res.status(200).json(team);
@@ -68,12 +73,13 @@ router.post("/join", protect, async (req, res) => {
 
   try {
     const team = await Team.findOne({ teamCode });
-
     if (!team) return res.status(404).json({ message: "Invalid team code" });
 
     // Check if user is already a member
     if (team.members.some((member) => member.user.toString() === userId)) {
-      return res.status(400).json({ message: "You are already a member of this team" });
+      return res
+        .status(400)
+        .json({ message: "You are already a member of this team" });
     }
 
     // Add user to team
