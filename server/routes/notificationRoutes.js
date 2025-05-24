@@ -24,6 +24,7 @@ router.get("/", protect, async (req, res, next) => {
     })
       .sort({ createdAt: -1 })
       .limit(20)
+      .populate("chat", "_id")
       .lean();
 
     console.log(

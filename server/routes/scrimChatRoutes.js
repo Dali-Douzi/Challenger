@@ -7,55 +7,68 @@ const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
+/**
+ * Only allow access if the user is the owner or a member of any involved team:
+ *  - teamA
+ *  - any team in scrim.requests
+ *  - teamB (if set)
+ */
 async function canAccessChat(userId, scrim) {
-  const isTeamA = scrim.teamA.toString() === userId;
-  const isRequester = scrim.requests
-    .map((id) => id.toString())
-    .includes(userId);
-  let isTeamB = false;
+  const teamIds = [scrim.teamA];
+
+  if (Array.isArray(scrim.requests) && scrim.requests.length) {
+    teamIds.push(...scrim.requests);
+  }
   if (scrim.teamB) {
-    const teamB = await Team.findById(scrim.teamB);
-    if (teamB) {
-      isTeamB =
-        teamB.owner.toString() === userId ||
-        teamB.members.some(
-          (m) => m.user.toString() === userId && m.role === "manager"
-        );
+    teamIds.push(scrim.teamB);
+  }
+
+  for (const teamId of teamIds) {
+    const team = await Team.findById(teamId);
+    if (!team) continue;
+
+    // Owner check
+    if (team.owner.toString() === userId) {
+      return true;
+    }
+    // Membership check
+    if (
+      Array.isArray(team.members) &&
+      team.members.some((m) => m.user.toString() === userId)
+    ) {
+      return true;
     }
   }
-  if (isTeamA || isRequester || isTeamB) return true;
-  // also allow teamA manager
-  const teamA = await Team.findById(scrim.teamA);
-  if (teamA) {
-    const isManagerA = teamA.members.some(
-      (m) => m.user.toString() === userId && m.role === "manager"
-    );
-    if (isManagerA) return true;
-  }
+
   return false;
 }
 
 /**
  * GET /api/scrims/chat/:scrimId?limit=&skip=
- * Fetch chat history (sorted oldest→newest), paginated
+ * Fetch chat history (oldest→newest), paginated.
  */
 router.get("/:scrimId", protect, async (req, res) => {
   const { scrimId } = req.params;
-  const limit = Math.max(parseInt(req.query.limit) || 50, 1);
-  const skip = Math.max(parseInt(req.query.skip) || 0, 0);
+  const limit = Math.max(parseInt(req.query.limit, 10) || 50, 1);
+  const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
   if (!mongoose.Types.ObjectId.isValid(scrimId)) {
     return res.status(400).json({ message: "Invalid scrim ID format" });
   }
+
   const scrim = await Scrim.findById(scrimId);
-  if (!scrim) return res.status(404).json({ message: "Scrim not found" });
+  if (!scrim) {
+    return res.status(404).json({ message: "Scrim not found" });
+  }
 
   if (!(await canAccessChat(req.user.id, scrim))) {
     return res.status(403).json({ message: "Not authorized to access chat" });
   }
 
   const chat = await ScrimChat.findOne({ scrim: scrimId });
-  if (!chat) return res.json({ messages: [] });
+  if (!chat) {
+    return res.json({ messages: [] });
+  }
 
   const sorted = chat.messages
     .slice()
@@ -67,19 +80,23 @@ router.get("/:scrimId", protect, async (req, res) => {
 
 /**
  * POST /api/scrims/chat/:scrimId
- * Send a new message
+ * Send a new message.
  */
 router.post("/:scrimId", protect, async (req, res) => {
   const { scrimId } = req.params;
   const { text } = req.body;
-  if (!text) return res.status(400).json({ message: "Text is required" });
 
+  if (!text) {
+    return res.status(400).json({ message: "Text is required" });
+  }
   if (!mongoose.Types.ObjectId.isValid(scrimId)) {
     return res.status(400).json({ message: "Invalid scrim ID format" });
   }
-  const scrim = await Scrim.findById(scrimId);
-  if (!scrim) return res.status(404).json({ message: "Scrim not found" });
 
+  const scrim = await Scrim.findById(scrimId);
+  if (!scrim) {
+    return res.status(404).json({ message: "Scrim not found" });
+  }
   if (!(await canAccessChat(req.user.id, scrim))) {
     return res.status(403).json({ message: "Not authorized to send messages" });
   }
@@ -98,7 +115,7 @@ router.post("/:scrimId", protect, async (req, res) => {
 
 /**
  * DELETE /api/scrims/chat/:scrimId
- * Disabled — chat history is permanent
+ * Disabled — chat history is permanent.
  */
 router.delete("/:scrimId", protect, (_req, res) => {
   res.status(403).json({ message: "Chat deletion is not allowed" });

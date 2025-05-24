@@ -15,118 +15,123 @@ import {
   Avatar,
 } from "@mui/material";
 import NotificationsIcon from "@mui/icons-material/Notifications";
+import ChatIcon from "@mui/icons-material/Chat";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4444";
 
-const Navbar = () => {
-  const { user, logout, loading: authLoading } = useContext(AuthContext);
+export default function Navbar() {
+  const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  // Avatar menu state
   const [avatarAnchor, setAvatarAnchor] = useState(null);
-  const openAvatarMenu = (e) => setAvatarAnchor(e.currentTarget);
-  const closeAvatarMenu = () => setAvatarAnchor(null);
-
-  // Notifications state
   const [notifAnchor, setNotifAnchor] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [notifLoading, setNotifLoading] = useState(false);
 
-  // Fetch notifications
+  const openAvatarMenu = (e) => setAvatarAnchor(e.currentTarget);
+  const closeAvatarMenu = () => setAvatarAnchor(null);
+
   const fetchNotifications = useCallback(async () => {
     setNotifLoading(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/api/notifications`);
-      setNotifications(Array.isArray(data) ? data : []);
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API_BASE}/api/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setNotifications(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
-      console.error("🔔 fetchNotifications error:", err);
+      console.error("Failed to load notifications:", err);
     } finally {
       setNotifLoading(false);
     }
   }, []);
 
-  // On user change, reload notifications
   useEffect(() => {
-    if (user) fetchNotifications();
-    else setNotifications([]);
+    if (user) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 10000);
+      return () => clearInterval(interval);
+    }
   }, [user, fetchNotifications]);
 
-  // Open notifications menu (refetch to get newest)
-  const openNotifMenu = (e) => {
-    setNotifAnchor(e.currentTarget);
-    fetchNotifications();
-  };
-  const closeNotifMenu = () => setNotifAnchor(null);
+  const nonChatNotifications = notifications.filter(
+    (n) => n.type !== "message"
+  );
+  const unreadNotifCount = nonChatNotifications.filter((n) => !n.read).length;
+  const chatNotifications = notifications.filter((n) => n.type === "message");
+  const unreadChatCount = chatNotifications.filter((n) => !n.read).length;
 
-  // Handle clicking a notification:
-  // 1) mark read on server
-  // 2) remove from list (updates badge)
-  // 3) navigate to its URL (or fallback path)
   const handleNotifClick = async (notif) => {
     try {
-      await axios.put(`${API_BASE}/api/notifications/${notif._id}/read`);
-      setNotifications((prev) => prev.filter((n) => n._id !== notif._id));
-      closeNotifMenu();
-      // navigate to the notification’s URL if provided, else default
-      const target = notif.url || `/scrims/${notif.scrim}/requests`;
-      navigate(target);
+      await axios.put(
+        `${API_BASE}/api/notifications/${notif._id}/read`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+        }
+      );
+      setNotifications((prev) =>
+        prev.map((n) => (n._id === notif._id ? { ...n, read: true } : n))
+      );
+      setNotifAnchor(null);
+      if (notif.type === "accept") {
+        navigate("/chats", { state: { chatId: notif.chat._id } });
+      } else {
+        navigate(notif.url || `/scrims/${notif.scrim}/requests`);
+      }
     } catch (err) {
       console.error("🔔 mark-as-read error:", err);
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
-
-  const getInitials = (name) => {
-    if (!name) return "?";
-    return name
-      .split(" ")
-      .map((n) => n[0].toUpperCase())
-      .slice(0, 2)
-      .join("");
+  // Mark chat notifications as read then navigate
+  const handleChatClick = async () => {
+    const toMark = chatNotifications.filter((n) => !n.read);
+    try {
+      await Promise.all(
+        toMark.map((n) =>
+          axios.put(
+            `${API_BASE}/api/notifications/${n._id}/read`,
+            {},
+            {
+              headers: {
+                Authorization: `Bearer ${localStorage.getItem("token")}`,
+              },
+            }
+          )
+        )
+      );
+      setNotifications((prev) =>
+        prev.map((n) => (n.type === "message" ? { ...n, read: true } : n))
+      );
+    } catch (err) {
+      console.error("Error marking chat notifications read:", err);
+    }
+    navigate("/chats");
   };
 
   return (
-    <AppBar position="sticky" color="primary">
+    <AppBar position="static">
       <Toolbar>
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          <Link to="/" style={{ color: "white", textDecoration: "none" }}>
-            Challenger
-          </Link>
+          Challenger
         </Typography>
 
-        {!authLoading && user ? (
-          <Box sx={{ display: "flex", alignItems: "center" }}>
-            <Link to="/dashboard" style={{ color: "white", margin: "0 10px" }}>
-              Dashboard
-            </Link>
-            <Link to="/scrims" style={{ color: "white", margin: "0 10px" }}>
-              Scrims
-            </Link>
-            <Link to="/teams" style={{ color: "white", margin: "0 10px" }}>
-              Teams
-            </Link>
-
-            {/* Notification bell */}
+        {user ? (
+          <>
+            {/* Notifications Bell (non-chat) */}
             <IconButton
               color="inherit"
-              onClick={openNotifMenu}
-              disabled={notifLoading}
+              onClick={(e) => setNotifAnchor(e.currentTarget)}
             >
-              <Badge
-                badgeContent={notifLoading ? 0 : notifications.length}
-                color="error"
-              >
+              <Badge badgeContent={unreadNotifCount} color="error">
                 <NotificationsIcon />
               </Badge>
             </IconButton>
             <Menu
               anchorEl={notifAnchor}
               open={Boolean(notifAnchor)}
-              onClose={closeNotifMenu}
+              onClose={() => setNotifAnchor(null)}
               PaperProps={{ style: { minWidth: 300 } }}
             >
               {notifLoading && (
@@ -134,11 +139,11 @@ const Navbar = () => {
                   <CircularProgress size={20} /> Loading…
                 </MenuItem>
               )}
-              {!notifLoading && notifications.length === 0 && (
+              {!notifLoading && nonChatNotifications.length === 0 && (
                 <MenuItem disabled>No new notifications</MenuItem>
               )}
               {!notifLoading &&
-                notifications.map((n) => (
+                nonChatNotifications.map((n) => (
                   <MenuItem
                     key={n._id}
                     onClick={() => handleNotifClick(n)}
@@ -156,20 +161,38 @@ const Navbar = () => {
                 ))}
             </Menu>
 
-            {/* Avatar */}
-            <IconButton color="inherit" onClick={openAvatarMenu} sx={{ ml: 1 }}>
-              <Avatar>
-                {user.avatar ? (
-                  <img
-                    src={user.avatar}
-                    alt="avatar"
-                    width={32}
-                    height={32}
-                    style={{ borderRadius: "50%" }}
-                  />
-                ) : (
-                  getInitials(user.username || user.email)
-                )}
+            {/* Chat Icon Button (chat notifications only) */}
+            <IconButton color="inherit" onClick={handleChatClick}>
+              <Badge badgeContent={unreadChatCount} color="error">
+                <ChatIcon />
+              </Badge>
+            </IconButton>
+
+            {/* Navigation Links */}
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2, ml: 2 }}>
+              <Link
+                to="/scrims"
+                style={{ color: "white", textDecoration: "none" }}
+              >
+                Scrims
+              </Link>
+              <Link
+                to="/teams"
+                style={{ color: "white", textDecoration: "none" }}
+              >
+                Team
+              </Link>
+            </Box>
+
+            {/* User Avatar & Menu */}
+            <IconButton color="inherit" onClick={openAvatarMenu}>
+              <Avatar src={user.avatar}>
+                {!user.avatar &&
+                  (user.username || user.email || user.name)
+                    .split(" ")
+                    .map((w) => w[0].toUpperCase())
+                    .slice(0, 2)
+                    .join("")}
               </Avatar>
             </IconButton>
             <Menu
@@ -179,21 +202,35 @@ const Navbar = () => {
             >
               <MenuItem
                 onClick={() => {
-                  navigate("/settings");
                   closeAvatarMenu();
+                  navigate("/profile");
                 }}
               >
-                Settings
+                Profile
               </MenuItem>
-              <MenuItem onClick={handleLogout}>Logout</MenuItem>
+              <MenuItem
+                onClick={() => {
+                  closeAvatarMenu();
+                  logout();
+                  navigate("/login");
+                }}
+              >
+                Logout
+              </MenuItem>
             </Menu>
-          </Box>
+          </>
         ) : (
           <Box sx={{ display: "flex", gap: 2 }}>
-            <Link to="/login" style={{ color: "white" }}>
+            <Link
+              to="/login"
+              style={{ color: "white", textDecoration: "none" }}
+            >
               Login
             </Link>
-            <Link to="/signup" style={{ color: "white" }}>
+            <Link
+              to="/signup"
+              style={{ color: "white", textDecoration: "none" }}
+            >
               Signup
             </Link>
           </Box>
@@ -201,6 +238,4 @@ const Navbar = () => {
       </Toolbar>
     </AppBar>
   );
-};
-
-export default Navbar;
+}

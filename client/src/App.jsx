@@ -4,7 +4,6 @@ import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import ScrimDashboard from "./pages/ScrimDashboard";
 import TeamDashboard from "./pages/TeamDashboard";
-import ScrimChat from "./pages/ScrimChat";
 import CreateTeam from "./pages/CreateTeam";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Navbar from "./components/Navbar";
@@ -16,6 +15,7 @@ import { Box } from "@mui/material";
 import TeamProfile from "./pages/TeamProfile";
 import EditScrim from "./pages/EditScrim";
 import ScrimRequests from "./pages/ScrimRequests";
+import ChatsPage from "./pages/ChatsPage";
 
 function App() {
   return (
@@ -72,15 +72,6 @@ function App() {
               }
             />
             <Route
-              path="/scrims/:id/chat"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <ScrimChat />
-                </ProtectedRoute>
-              }
-            />
-            <Route
               path="/create-team"
               element={
                 <ProtectedRoute>
@@ -105,6 +96,7 @@ function App() {
               path="/scrims/:scrimId/requests"
               element={<ScrimRequests />}
             />
+            <Route path="/chats" element={<ChatsPage />} />
             <Route
               path="*"
               element={

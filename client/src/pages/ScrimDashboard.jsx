@@ -196,6 +196,7 @@ const ScrimDashboard = () => {
         if (errData.message === "Scrim request already sent") {
           return;
         }
+        console.error("💥 request-error payload:", errData);
         throw new Error(errData.message || "Failed to send request");
       }
     } catch (err) {

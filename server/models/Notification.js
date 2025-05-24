@@ -8,6 +8,12 @@ const notificationSchema = new mongoose.Schema(
       ref: "Scrim",
       required: true,
     },
+    chat: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ScrimChat",
+      required: true,
+    },
+    url: { type: String },
     message: { type: String, required: true },
     type: { type: String }, // e.g. "request", "accept", "decline"
     read: { type: Boolean, default: false },

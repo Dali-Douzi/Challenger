@@ -4,40 +4,45 @@ const Scrim = require("../models/Scrim");
 const Team = require("../models/Team");
 const Game = require("../models/Game");
 const Notification = require("../models/Notification");
+const ScrimChat = require("../models/ScrimChat");
 const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
 /**
- * GET /api/scrims
- * List all scrims (open and booked), with teamA and teamB names
+ * @desc    List all scrims (open and booked)
+ * @route   GET /api/scrims
+ * @access  Private
  */
 router.get("/", protect, async (req, res) => {
   try {
     const scrims = await Scrim.find()
       .populate("teamA", "name")
       .populate("teamB", "name")
-      .select("format scheduledTime status teamA teamB");
+      .populate("requests", "name");
     res.json(scrims);
-  } catch (err) {
-    console.error("🔥 List scrims Error:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+  } catch (error) {
+    console.error("🔥 List scrims Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
 /**
- * POST /api/scrims
- * Create a new scrim (owner or manager)
+ * @desc    Create a new scrim
+ * @route   POST /api/scrims
+ * @access  Private (owner or manager)
  */
 router.post("/", protect, async (req, res) => {
   const { teamId, format, scheduledTime } = req.body;
   try {
+    // Validate teamId
     if (!mongoose.Types.ObjectId.isValid(teamId)) {
       return res.status(400).json({ message: "Invalid team ID format" });
     }
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
+    // Check owner/manager
     const isOwner = team.owner.toString() === req.user.id;
     const isManager = team.members.some(
       (m) => m.user.toString() === req.user.id && m.role === "manager"
@@ -45,9 +50,10 @@ router.post("/", protect, async (req, res) => {
     if (!isOwner && !isManager) {
       return res
         .status(403)
-        .json({ message: "Only the owner or a manager can create a scrim" });
+        .json({ message: "Not authorized to create scrim" });
     }
 
+    // Resolve the Game document
     let gameDoc = null;
     if (mongoose.Types.ObjectId.isValid(team.game)) {
       gameDoc = await Game.findById(team.game).select("formats name");
@@ -58,19 +64,22 @@ router.post("/", protect, async (req, res) => {
     if (!gameDoc) {
       return res.status(404).json({ message: "Game not found" });
     }
+
+    // Validate format
     if (!gameDoc.formats.includes(format)) {
       return res
         .status(400)
         .json({ message: `Invalid format for ${gameDoc.name}` });
     }
 
+    // Create
     const scrim = await Scrim.create({
       teamA: team._id,
+      game: gameDoc._id,
       format,
-      scheduledTime: new Date(scheduledTime).toISOString(),
+      scheduledTime: new Date(scheduledTime),
       status: "open",
     });
-
     res.status(201).json(scrim);
   } catch (error) {
     console.error("🔥 Scrim-create Error:", error);
@@ -79,33 +88,52 @@ router.post("/", protect, async (req, res) => {
 });
 
 /**
- * POST /api/scrims/request/:scrimId
- * Send a request to join a scrim
+ * @desc    Team B requests to join an open scrim
+ * @route   POST /api/scrims/request/:scrimId
+ * @access  Private
  */
 router.post("/request/:scrimId", protect, async (req, res) => {
+  console.log("→ [ScrimRequest] params:", req.params);
+  console.log("→ [ScrimRequest] body:  ", req.body);
   try {
-    const scrim = await Scrim.findById(req.params.scrimId);
-    if (!scrim) return res.status(404).json({ message: "Scrim not found" });
-
+    const { scrimId } = req.params;
     const { teamId } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(teamId)) {
-      return res.status(400).json({ message: "Invalid team ID format" });
+
+    // 1) Validate IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(scrimId) ||
+      !mongoose.Types.ObjectId.isValid(teamId)
+    ) {
+      return res.status(400).json({ message: "Invalid ID format" });
     }
-    const team = await Team.findById(teamId);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-    if (scrim.teamA.toString() === teamId) {
+
+    // 2) Look up scrim
+    const scrim = await Scrim.findById(scrimId);
+    if (!scrim) {
+      return res.status(404).json({ message: "Scrim not found" });
+    }
+    if (scrim.status !== "open") {
       return res
         .status(400)
-        .json({ message: "You cannot request your own scrim" });
+        .json({ message: "Scrim is not open for requests" });
     }
-    if (scrim.requests.includes(teamId)) {
+
+    // 3) Make sure the team exists (and optionally belongs to this user)
+    const requestingTeam = await Team.findById(teamId);
+    if (!requestingTeam) {
+      return res.status(404).json({ message: "Requesting team not found" });
+    }
+
+    // 4) Prevent duplicates
+    if (scrim.requests.some((id) => id.toString() === teamId)) {
       return res.status(400).json({ message: "Scrim request already sent" });
     }
 
+    // 5) Save the request
     scrim.requests.push(teamId);
     await scrim.save();
 
-    const ScrimChat = require("../models/ScrimChat");
+    // 6) Notify the owner
     let chat = await ScrimChat.findOne({ scrim: scrim._id });
     if (!chat) {
       chat = new ScrimChat({ scrim: scrim._id, messages: [] });
@@ -115,60 +143,75 @@ router.post("/request/:scrimId", protect, async (req, res) => {
     await Notification.create({
       team: scrim.teamA,
       scrim: scrim._id,
-      message: `${team.name} requested your scrim`,
+      chat: chat._id,
+      message: `${requestingTeam.name} requested your scrim`,
       type: "request",
+      url: `/scrims/${scrim._id}/requests`,
     });
 
-    res.json({ message: "Scrim request sent", scrim });
+    // 7) Return success
+    return res.json({ message: "Scrim request sent", scrim });
   } catch (error) {
-    console.error("🔥 Scrim-request Error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("🔥 Scrim-request Error:", error.stack);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 });
 
 /**
- * GET /api/scrims/:scrimId
- * Fetch a single scrim (owner/manager sees requests)
+ * @desc    Fetch a single scrim (owner/manager sees pending requests)
+ * @route   GET /api/scrims/:scrimId
+ * @access  Private
  */
 router.get("/:scrimId", protect, async (req, res) => {
+  const { scrimId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(scrimId)) {
+    return res.status(400).json({ message: "Invalid scrim ID format" });
+  }
   try {
-    const scrim = await Scrim.findById(req.params.scrimId)
-      .populate("teamA", "name rank owner members game")
-      .populate("teamB", "name rank")
-      .populate("requests", "name rank");
-    if (!scrim) return res.status(404).json({ message: "Scrim not found" });
+    const scrim = await Scrim.findById(scrimId)
+      .populate("teamA", "name owner members game")
+      .populate("teamB", "name")
+      .populate("requests", "name"); // ← populate the pending‐requests array
+    if (!scrim) {
+      return res.status(404).json({ message: "Scrim not found" });
+    }
 
+    // only the teamA owner or a manager can see requests
     const isOwner = scrim.teamA.owner.toString() === req.user.id;
     const isManager = scrim.teamA.members.some(
       (m) => m.user.toString() === req.user.id && m.role === "manager"
     );
-    const scrimObj = scrim.toObject();
-    if (!isOwner && !isManager) delete scrimObj.requests;
+    const payload = scrim.toObject();
+    if (!isOwner && !isManager) {
+      delete payload.requests; // hide from everyone else
+    }
 
-    res.json(scrimObj);
-  } catch (error) {
-    console.error("🔥 Scrim-fetch Error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.json(payload);
+  } catch (err) {
+    console.error("🔥 Scrim-fetch Error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 
 /**
- * PUT /api/scrims/:scrimId
- * Update a scrim's format or scheduledTime
+ * @desc    Update a scrim's format or time (owner/manager only)
+ * @route   PUT /api/scrims/:scrimId
+ * @access  Private
  */
 router.put("/:scrimId", protect, async (req, res) => {
   const { scrimId } = req.params;
   const { format, scheduledTime } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(scrimId)) {
+    return res.status(400).json({ message: "Invalid scrim ID format" });
+  }
   try {
-    if (!mongoose.Types.ObjectId.isValid(scrimId)) {
-      return res.status(400).json({ message: "Invalid scrim ID format" });
-    }
     const scrim = await Scrim.findById(scrimId);
     if (!scrim) return res.status(404).json({ message: "Scrim not found" });
 
+    // Check owner/manager
     const team = await Team.findById(scrim.teamA);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-
     const isOwner = team.owner.toString() === req.user.id;
     const isManager = team.members.some(
       (m) => m.user.toString() === req.user.id && m.role === "manager"
@@ -179,27 +222,10 @@ router.put("/:scrimId", protect, async (req, res) => {
         .json({ message: "Only the owner or a manager can edit this scrim" });
     }
 
-    let gameDoc = null;
-    if (mongoose.Types.ObjectId.isValid(team.game)) {
-      gameDoc = await Game.findById(team.game).select("formats name");
-    }
-    if (!gameDoc) {
-      gameDoc = await Game.findOne({ name: team.game }).select("formats name");
-    }
-    if (!gameDoc) {
-      return res.status(404).json({ message: "Game not found" });
-    }
-    if (!gameDoc.formats.includes(format)) {
-      return res
-        .status(400)
-        .json({ message: `Invalid format for ${gameDoc.name}` });
-    }
-
-    scrim.format = format;
-    scrim.scheduledTime = new Date(scheduledTime);
-    await scrim.save();
-
-    res.json(scrim);
+    if (format) scrim.format = format;
+    if (scheduledTime) scrim.scheduledTime = new Date(scheduledTime);
+    const updated = await scrim.save();
+    res.json(updated);
   } catch (error) {
     console.error("🔥 Scrim-update Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -207,19 +233,90 @@ router.put("/:scrimId", protect, async (req, res) => {
 });
 
 /**
- * PUT /api/scrims/accept/:scrimId
- * Owner/manager accepts a pending scrim request
+ * @desc    Delete a scrim (owner/manager only)
+ * @route   DELETE /api/scrims/:scrimId
+ * @access  Private
  */
-router.put("/accept/:scrimId", protect, async (req, res) => {
+router.delete("/:scrimId", protect, async (req, res) => {
+  const { scrimId } = req.params;
+
+  // 1. Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(scrimId)) {
+    return res.status(400).json({ message: "Invalid scrim ID format" });
+  }
+
   try {
-    const scrim = await Scrim.findById(req.params.scrimId);
-    if (!scrim) return res.status(404).json({ message: "Scrim not found" });
+    // 2. Fetch the scrim
+    const scrim = await Scrim.findById(scrimId);
+    if (!scrim) {
+      return res.status(404).json({ message: "Scrim not found" });
+    }
 
+    // 3. Permission check
     const team = await Team.findById(scrim.teamA);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-
+    if (!team) {
+      return res.status(404).json({ message: "Team not found" });
+    }
     const isOwner = team.owner.toString() === req.user.id;
     const isManager = team.members.some(
+      (m) => m.user.toString() === req.user.id && m.role === "manager"
+    );
+    if (!isOwner && !isManager) {
+      return res
+        .status(403)
+        .json({ message: "Only the owner or a manager can delete this scrim" });
+    }
+
+    // 4. Delete via model method
+    await Scrim.findByIdAndDelete(scrimId);
+
+    // 5. Success response
+    return res.json({ message: "Scrim removed" });
+  } catch (error) {
+    console.error("🔥 Scrim-delete Error:", error);
+    // Return the actual error message (and stack if you like) for debugging
+    return res
+      .status(500)
+      .json({ message: error.message || "Server error", error: error.stack });
+  }
+});
+
+/**
+ * @desc    Owner/manager accepts a pending scrim request
+ * @route   PUT /api/scrims/accept/:scrimId
+ * @access  Private
+ */
+router.put("/accept/:scrimId", protect, async (req, res) => {
+  const { scrimId } = req.params;
+  const { teamId } = req.body;
+
+  // 1) Validate IDs
+  if (
+    !mongoose.Types.ObjectId.isValid(scrimId) ||
+    !mongoose.Types.ObjectId.isValid(teamId)
+  ) {
+    return res.status(400).json({ message: "Invalid scrimId or teamId" });
+  }
+
+  try {
+    // 2) Load scrim & verify it’s open
+    const scrim = await Scrim.findById(scrimId);
+    if (!scrim) return res.status(404).json({ message: "Scrim not found" });
+    if (scrim.status !== "open") {
+      return res
+        .status(400)
+        .json({ message: "Scrim is not open for accepting requests" });
+    }
+
+    // 3) Load both teams
+    const postingTeam = await Team.findById(scrim.teamA);
+    const requestingTeam = await Team.findById(teamId);
+    if (!postingTeam || !requestingTeam) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+
+    const isOwner = postingTeam.owner.toString() === req.user.id;
+    const isManager = postingTeam.members.some(
       (m) => m.user.toString() === req.user.id && m.role === "manager"
     );
     if (!isOwner && !isManager) {
@@ -228,77 +325,123 @@ router.put("/accept/:scrimId", protect, async (req, res) => {
         .json({ message: "Only the owner or a manager can accept this scrim" });
     }
 
-    const { teamId } = req.body;
+    // 4) Ensure the requesting team actually asked
     if (!scrim.requests.includes(teamId)) {
       return res
         .status(400)
-        .json({ message: "This team did not request to join the scrim" });
+        .json({ message: "That team did not request this scrim" });
     }
 
+    // 5) Move teamId → teamB, clear requests, mark booked
     scrim.teamB = teamId;
     scrim.status = "booked";
     scrim.requests = [];
     await scrim.save();
 
+    // 6) Ensure chat thread exists
+    let chat = await ScrimChat.findOne({ scrim: scrim._id });
+    if (!chat) {
+      chat = new ScrimChat({ scrim: scrim._id, messages: [] });
+      await chat.save();
+    }
+
+    // 7) Notify challenging team
     await Notification.create({
       team: teamId,
       scrim: scrim._id,
-      message: `${team.name} accepted your scrim request`,
+      chat: chat._id,
+      message: `${postingTeam.name} accepted your scrim request`,
       type: "accept",
+      url: "/chats",
     });
 
-    res.json({ message: "Scrim booked", scrim });
+    await Notification.create({
+      team: scrim.teamA,
+      scrim: scrim._id,
+      chat: chat._id,
+      message: `You accepted ${requestingTeam.name}'s request`,
+      type: "accept-feedback",
+      url: "/chats",
+    });
+
+    return res.json({ message: "Scrim request accepted", scrim });
   } catch (error) {
-    console.error("🔥 Scrim-accept Error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("🔥 Scrim-accept Error:", error.stack);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 });
 
 /**
- * PUT /api/scrims/decline/:scrimId
- * Owner/manager declines a pending scrim request
+ * @desc    Owner/manager declines a pending scrim request
+ * @route   PUT /api/scrims/decline/:scrimId
+ * @access  Private
  */
 router.put("/decline/:scrimId", protect, async (req, res) => {
+  const { scrimId } = req.params;
+  const { teamId } = req.body;
+
+  // 1) Validate IDs
+  if (
+    !mongoose.Types.ObjectId.isValid(scrimId) ||
+    !mongoose.Types.ObjectId.isValid(teamId)
+  ) {
+    return res.status(400).json({ message: "Invalid scrimId or teamId" });
+  }
+
   try {
-    const scrim = await Scrim.findById(req.params.scrimId);
+    // 2) Load scrim
+    const scrim = await Scrim.findById(scrimId);
     if (!scrim) return res.status(404).json({ message: "Scrim not found" });
 
+    // 3) Permission check on teamA
     const team = await Team.findById(scrim.teamA);
     if (!team) return res.status(404).json({ message: "Team not found" });
-
     const isOwner = team.owner.toString() === req.user.id;
     const isManager = team.members.some(
       (m) => m.user.toString() === req.user.id && m.role === "manager"
     );
     if (!isOwner && !isManager) {
-      return res
-        .status(403)
-        .json({
-          message: "Only the owner or a manager can decline this scrim request",
-        });
+      return res.status(403).json({
+        message: "Only the owner or a manager can decline this scrim",
+      });
     }
 
-    const { teamId } = req.body;
+    // 4) Ensure the team had requested
     if (!scrim.requests.includes(teamId)) {
       return res
         .status(400)
-        .json({ message: "This team did not request to join the scrim" });
+        .json({ message: "That team did not request this scrim" });
     }
 
+    // 5) Remove request & save
     scrim.requests = scrim.requests.filter((id) => id.toString() !== teamId);
     await scrim.save();
 
+    // 6) Ensure chat thread exists (for notification)
+    let chat = await ScrimChat.findOne({ scrim: scrim._id });
+    if (!chat) {
+      chat = new ScrimChat({ scrim: scrim._id, messages: [] });
+      await chat.save();
+    }
+
+    // 7) Notify the declined team
     await Notification.create({
       team: teamId,
       scrim: scrim._id,
+      chat: chat._id,
       message: `${team.name} declined your scrim request`,
       type: "decline",
+      url: "/chats",
     });
 
-    res.json({ message: "Scrim request declined", scrim });
+    return res.json({ message: "Scrim request declined", scrim });
   } catch (error) {
-    console.error("🔥 Scrim-decline Error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("🔥 Scrim-decline Error:", error.stack);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 });
 

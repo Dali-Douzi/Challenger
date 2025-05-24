@@ -12,7 +12,9 @@ import {
   Paper,
 } from "@mui/material";
 
-const EditScrim = () => {
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4444";
+
+export default function EditScrim() {
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
   const scrimId = localStorage.getItem("editingScrimId");
@@ -23,13 +25,13 @@ const EditScrim = () => {
   const [formats, setFormats] = useState([]);
   const [format, setFormat] = useState("");
 
-  const [date, setDate] = useState(""); // e.g. "2025-05-20"
-  const [time, setTime] = useState(""); // e.g. "18:00"
+  const [date, setDate] = useState(""); // e.g. "2025-05-23"
+  const [time, setTime] = useState(""); // e.g. "18:30"
 
   const [dateOptions, setDateOptions] = useState([]);
   const [timeOptions, setTimeOptions] = useState([]);
 
-  // helpers to generate dropdown options
+  // Helpers to build dropdown lists
   const getDayOptions = () => {
     const opts = ["Today", "Tomorrow"];
     const today = new Date();
@@ -42,37 +44,39 @@ const EditScrim = () => {
   };
 
   const getTimeOptions = () => {
-    const times = [];
+    const opts = [];
     for (let h = 0; h < 24; h++) {
       const hh = h.toString().padStart(2, "0");
-      ["00", "30"].forEach((mm) => times.push(`${hh}:${mm}`));
+      ["00", "30"].forEach((mm) => opts.push(`${hh}:${mm}`));
     }
-    return times;
+    return opts;
   };
 
+  // ─── Load scrim & populate form ─────────────────────────────────────────────
   useEffect(() => {
     if (!scrimId) {
       navigate("/scrims");
       return;
     }
-    (async () => {
+
+    const loadScrim = async () => {
       try {
-        // 1. Load scrim
-        const res = await fetch(`http://localhost:4444/api/scrims/${scrimId}`, {
+        setLoading(true);
+        // 1) fetch scrim
+        const res = await fetch(`${API_BASE}/api/scrims/${scrimId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error("Failed to load scrim");
         const scrim = await res.json();
 
-        // parse date & time from scheduledTime
+        // 2) parse and set date/time
         const dt = new Date(scrim.scheduledTime);
         const isoDate = dt.toISOString().slice(0, 10);
         const isoTime = dt.toTimeString().slice(0, 5);
-
         setDate(isoDate);
         setTime(isoTime);
 
-        // build dropdown options including current values
+        // 3) build dropdowns (include current values at top)
         const days = getDayOptions();
         if (!days.includes(isoDate)) days.unshift(isoDate);
         setDateOptions(days);
@@ -81,29 +85,21 @@ const EditScrim = () => {
         if (!times.includes(isoTime)) times.unshift(isoTime);
         setTimeOptions(times);
 
-        // 2. Load team to get its game
+        // 4) fetch team to get its game
         const teamRes = await fetch(
-          `http://localhost:4444/api/teams/${scrim.teamA._id}`,
+          `${API_BASE}/api/teams/${scrim.teamA._id}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!teamRes.ok) throw new Error("Failed to load team");
         const team = await teamRes.json();
 
-        // 3. Load all games to derive formats
-        const gamesRes = await fetch("http://localhost:4444/api/games");
+        // 5) fetch all games to derive formats
+        const gamesRes = await fetch(`${API_BASE}/api/games`);
         if (!gamesRes.ok) throw new Error("Failed to load games");
         const games = await gamesRes.json();
-
-        const gameDoc = games.find(
-          (g) => g._id === team.game || g.name === team.game
-        );
-        const fetchedFormats = gameDoc?.formats || [];
-
-        // include current format in options
-        const uniqueFormats = fetchedFormats.includes(scrim.format)
-          ? fetchedFormats
-          : [scrim.format, ...fetchedFormats];
-        setFormats(uniqueFormats);
+        const gameDoc =
+          games.find((g) => g._id === team.game || g.name === team.game) || {};
+        setFormats(gameDoc.formats || []);
         setFormat(scrim.format);
       } catch (err) {
         console.error(err);
@@ -112,21 +108,23 @@ const EditScrim = () => {
       } finally {
         setLoading(false);
       }
-    })();
+    };
+
+    loadScrim();
   }, [scrimId, token, navigate]);
 
+  // ─── Save changes ─────────────────────────────────────────────────────────────
   const handleSave = async () => {
     setSaving(true);
     try {
-      // translate "Today"/"Tomorrow"/"YYYY-MM-DD" into ISO
+      // build new ISO timestamp from dropdowns
       let dt = new Date();
       if (date === "Tomorrow") dt.setDate(dt.getDate() + 1);
       else if (date !== "Today") dt = new Date(date);
-
       const [h, m] = time.split(":").map(Number);
       dt.setHours(h, m, 0, 0);
 
-      const res = await fetch(`http://localhost:4444/api/scrims/${scrimId}`, {
+      const res = await fetch(`${API_BASE}/api/scrims/${scrimId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -138,8 +136,8 @@ const EditScrim = () => {
         }),
       });
       if (!res.ok) {
-        const payload = await res.json();
-        throw new Error(payload.message || "Save failed");
+        const { message } = await res.json();
+        throw new Error(message || "Save failed");
       }
       navigate("/scrims");
     } catch (err) {
@@ -150,6 +148,31 @@ const EditScrim = () => {
     }
   };
 
+  // ─── Delete scrim ────────────────────────────────────────────────────────────
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this scrim?")) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/scrims/${scrimId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const { message } = await res.json();
+        throw new Error(message || "Delete failed");
+      }
+      navigate("/scrims");
+    } catch (err) {
+      console.error("Delete Error:", err);
+      alert(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
@@ -164,12 +187,11 @@ const EditScrim = () => {
         Edit Scrim
       </Typography>
 
-      {/* Format dropdown */}
+      {/* Format */}
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel id="format-label">Format</InputLabel>
         <Select
           labelId="format-label"
-          id="format-select"
           value={format}
           label="Format"
           onChange={(e) => setFormat(e.target.value)}
@@ -182,12 +204,11 @@ const EditScrim = () => {
         </Select>
       </FormControl>
 
-      {/* Date dropdown */}
+      {/* Date */}
       <FormControl fullWidth sx={{ mb: 2 }}>
         <InputLabel id="date-label">Date</InputLabel>
         <Select
           labelId="date-label"
-          id="date-select"
           value={date}
           label="Date"
           onChange={(e) => setDate(e.target.value)}
@@ -200,12 +221,11 @@ const EditScrim = () => {
         </Select>
       </FormControl>
 
-      {/* Time dropdown */}
+      {/* Time */}
       <FormControl fullWidth sx={{ mb: 3 }}>
         <InputLabel id="time-label">Time</InputLabel>
         <Select
           labelId="time-label"
-          id="time-select"
           value={time}
           label="Time"
           onChange={(e) => setTime(e.target.value)}
@@ -221,8 +241,15 @@ const EditScrim = () => {
       <Button variant="contained" onClick={handleSave} disabled={saving}>
         {saving ? "Saving…" : "Save Changes"}
       </Button>
+      <Button
+        variant="outlined"
+        color="error"
+        onClick={handleDelete}
+        disabled={saving}
+        sx={{ ml: 2 }}
+      >
+        Delete Scrim
+      </Button>
     </Paper>
   );
-};
-
-export default EditScrim;
+}
