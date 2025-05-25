@@ -97,6 +97,7 @@ function App() {
               element={<ScrimRequests />}
             />
             <Route path="/chats" element={<ChatsPage />} />
+            <Route path="/chats/:chatId" element={<ChatsPage />} />
             <Route
               path="*"
               element={

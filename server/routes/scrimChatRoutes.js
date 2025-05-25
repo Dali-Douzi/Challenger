@@ -65,7 +65,12 @@ router.get("/:scrimId", protect, async (req, res) => {
     return res.status(403).json({ message: "Not authorized to access chat" });
   }
 
-  const chat = await ScrimChat.findOne({ scrim: scrimId });
+  // **Populate sender details on each message**
+  const chat = await ScrimChat.findOne({ scrim: scrimId }).populate(
+    "messages.sender",
+    "username avatar"
+  );
+
   if (!chat) {
     return res.json({ messages: [] });
   }
@@ -103,22 +108,18 @@ router.post("/:scrimId", protect, async (req, res) => {
 
   let chat = await ScrimChat.findOne({ scrim: scrimId });
   if (!chat) {
-    chat = new ScrimChat({ scrim: scrimId, messages: [] });
+    chat = await ScrimChat.create({ scrim: scrimId, messages: [] });
   }
 
-  const msg = { sender: req.user.id, text, timestamp: new Date() };
+  const msg = {
+    sender: req.user.id,
+    text,
+    timestamp: new Date(),
+  };
   chat.messages.push(msg);
   await chat.save();
 
   res.status(201).json({ message: "Message sent", msg });
-});
-
-/**
- * DELETE /api/scrims/chat/:scrimId
- * Disabled — chat history is permanent.
- */
-router.delete("/:scrimId", protect, (_req, res) => {
-  res.status(403).json({ message: "Chat deletion is not allowed" });
 });
 
 module.exports = router;

@@ -3,6 +3,7 @@ const ScrimChat = require("./models/ScrimChat");
 const Scrim = require("./models/Scrim");
 const Team = require("./models/Team");
 const Notification = require("./models/Notification");
+const User = require("./models/User");
 
 module.exports = (io) => {
   // Authenticate socket connections via JWT
@@ -83,6 +84,10 @@ module.exports = (io) => {
         chat.messages.push(msg);
         await chat.save();
 
+        const senderUser = await User.findById(socket.userId).select(
+          "username avatar"
+        );
+
         // Load scrim to identify recipient teams
         const scrim = await Scrim.findById(scrimId);
         const allTeams = [
@@ -122,7 +127,10 @@ module.exports = (io) => {
         );
 
         // Broadcast to room
-        io.to(scrimId).emit("newMessage", msg);
+        io.to(scrimId).emit("newMessage", {
+          ...msg, // spreads sender, text, timestamp
+          sender: senderUser, // the full user object
+        });
       } catch (err) {
         console.error("sendMessage error:", err);
         socket.emit("error", "Server error sending message");

@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
-import io from "socket.io-client"; // Ensure socket.io-client is installed
+import io from "socket.io-client";
 import { AuthContext } from "../context/AuthContext";
 import {
   Box,
@@ -10,73 +10,78 @@ import {
   TextField,
   IconButton,
   Avatar,
+  CircularProgress,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4444";
+const API_BASE = "http://localhost:4444";
 let socket;
 
-// Helper: initials fallback
-const getInitials = (name) =>
-  name
+// Up to two initials from a name
+const getInitials = (str) =>
+  str
     .trim()
     .split(/\s+/)
     .map((w) => w[0].toUpperCase())
     .slice(0, 2)
     .join("");
 
-export default function ScrimChat({ chatId: propChatId }) {
+export default function ScrimChat(props) {
   const { user } = useContext(AuthContext);
+  const { chatId: paramChatId } = useParams();
   const { state } = useLocation();
   const navigate = useNavigate();
-  const { chatId: paramChatId } = useParams();
-  const chatId = propChatId || state?.chatId || paramChatId;
+  const chatId = props.chatId || state?.chatId || paramChatId;
   const token = localStorage.getItem("token") || "";
 
   const [scrim, setScrim] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  // Redirect if no chatId
+  // Our user’s ID
+  const myId = user?.id ?? user?._id;
+
+  // Redirect if no chat
   useEffect(() => {
     if (!chatId) navigate("/chats");
   }, [chatId, navigate]);
 
-  // Real-time via Socket.IO
+  // Socket.io
   useEffect(() => {
     if (!chatId) return;
     socket = io(API_BASE, { auth: { token } });
     socket.emit("joinRoom", chatId);
-    socket.on("newMessage", (msg) => {
-      setMessages((prev) => [...prev, msg]);
-    });
+    socket.on("newMessage", (msg) => setMessages((prev) => [...prev, msg]));
     return () => socket.disconnect();
   }, [chatId, token]);
 
-  // Fetch scrim & history once
+  // Fetch scrim + messages
   useEffect(() => {
     if (!chatId) return;
     let mounted = true;
-    const fetchChat = async () => {
+    (async () => {
+      setLoading(true);
       try {
-        const [scrimRes, chatRes] = await Promise.all([
-          axios.get(`${API_BASE}/api/scrims/${chatId}`, {
+        const [sRes, mRes] = await Promise.all([
+          axios.get(`/api/scrims/${chatId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get(`${API_BASE}/api/scrims/chat/${chatId}`, {
+          axios.get(`/api/scrims/chat/${chatId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
-        if (mounted) {
-          setScrim(scrimRes.data);
-          setMessages(chatRes.data.messages || []);
-        }
+        if (!mounted) return;
+        setScrim(sRes.data);
+        setMessages(mRes.data.messages || []);
       } catch (err) {
-        console.error("Chat load error:", err);
+        if (mounted) setError(err.response?.data?.message || err.message);
+      } finally {
+        if (mounted) setLoading(false);
       }
-    };
-    fetchChat();
+    })();
     return () => {
       mounted = false;
     };
@@ -93,13 +98,35 @@ export default function ScrimChat({ chatId: propChatId }) {
     setText("");
   };
 
-  if (!scrim) {
+  if (loading) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
-        <Typography>Loading chat…</Typography>
+      <Box flex={1} display="flex" alignItems="center" justifyContent="center">
+        <CircularProgress />
       </Box>
     );
   }
+  if (error) {
+    return (
+      <Box flex={1} display="flex" alignItems="center" justifyContent="center">
+        <Typography color="error">{error}</Typography>
+      </Box>
+    );
+  }
+
+  // Cluster messages by sender + minute
+  const clusters = [];
+  messages.forEach((msg) => {
+    const senderObj =
+      typeof msg.sender === "object" ? msg.sender : { _id: msg.sender };
+    const senderId = senderObj._id;
+    const minuteKey = new Date(msg.timestamp).toISOString().substr(0, 16);
+    const last = clusters[clusters.length - 1];
+    if (last && last.senderId === senderId && last.minuteKey === minuteKey) {
+      last.msgs.push(msg);
+    } else {
+      clusters.push({ senderId, senderObj, minuteKey, msgs: [msg] });
+    }
+  });
 
   // Header info
   const headerTitle = `${scrim.teamA.name} vs ${scrim.teamB?.name || "TBD"}`;
@@ -117,7 +144,6 @@ export default function ScrimChat({ chatId: propChatId }) {
           boxShadow: 1,
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
         }}
       >
         <Typography variant="h6">{headerTitle}</Typography>
@@ -127,76 +153,124 @@ export default function ScrimChat({ chatId: propChatId }) {
       </Box>
 
       {/* Messages */}
-      <Paper sx={{ flexGrow: 1, p: 2, overflowY: "auto", bgcolor: "#f9f9f9" }}>
-        {messages.length === 0 ? (
-          <Typography color="textSecondary">No messages yet.</Typography>
-        ) : (
-          messages.map((msg) => {
-            const isMine =
-              msg.sender._id === user.id || msg.sender._id === user._id;
-            // Display actual usernames
-            const senderName = isMine
-              ? user.username || user.name
-              : msg.sender.username;
-            const avatarSrc = isMine ? user.avatar : msg.sender.avatar;
-
-            return (
+      <Paper
+        square
+        sx={{
+          flex: 1,
+          p: 2,
+          bgcolor: "grey.50",
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",
+        }}
+      >
+        {clusters.map((cluster, i) => {
+          const isMine = cluster.senderId === myId;
+          const name = isMine
+            ? user.username || user.email || "You"
+            : cluster.senderObj.username || "Unknown";
+          const avatar = isMine ? user.avatar : cluster.senderObj.avatar;
+          return (
+            <Box
+              key={i}
+              sx={{
+                mb: 3,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: isMine ? "flex-end" : "flex-start",
+              }}
+            >
+              {/* Avatar & name once */}
               <Box
-                key={msg._id}
                 sx={{
-                  mb: 2,
                   display: "flex",
-                  flexDirection: "column",
-                  alignItems: isMine ? "flex-end" : "flex-start",
+                  flexDirection: isMine ? "row-reverse" : "row",
+                  alignItems: "center",
+                  mb: 1,
                 }}
               >
-                <Typography variant="subtitle2">{senderName}</Typography>
-                <Box
-                  sx={{
-                    mt: 0.5,
-                    display: "flex",
-                    alignItems: "center",
-                    flexDirection: isMine ? "row-reverse" : "row",
-                  }}
-                >
-                  <Avatar src={avatarSrc} sx={{ width: 24, height: 24, mx: 1 }}>
-                    {!avatarSrc && getInitials(senderName)}
-                  </Avatar>
+                <Avatar src={avatar} sx={{ width: 32, height: 32, mx: 1 }}>
+                  {!avatar && getInitials(name)}
+                </Avatar>
+                <Typography variant="subtitle2">{name}</Typography>
+              </Box>
+
+              {/* Each message in cluster */}
+              {cluster.msgs.map((msg) => {
+                const time = new Date(msg.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                });
+                return (
                   <Box
+                    key={msg._id}
                     sx={{
                       px: 1.5,
                       py: 1,
                       borderRadius: 2,
+                      bgcolor: isMine ? "primary.main" : "grey.300",
+                      color: "black",
+                      mb: 1,
                       maxWidth: "70%",
-                      bgcolor: isMine ? "primary.main" : "grey.200",
+                      display: "flex",
+                      flexDirection: isMine ? "row-reverse" : "row",
+                      alignItems: "flex-end",
                     }}
                   >
-                    <Typography sx={{ color: isMine ? "white" : "black" }}>
+                    {/* text */}
+                    <Typography
+                      sx={{
+                        flex: 1,
+                        wordBreak: "break-word",
+                        ...(isMine ? { ml: 1 } : { mr: 1 }),
+                      }}
+                    >
                       {msg.text}
                     </Typography>
+                    {/* time */}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        flexShrink: 0,
+                        color: "black",
+                      }}
+                    >
+                      {time}
+                    </Typography>
                   </Box>
-                </Box>
-                <Typography variant="caption" sx={{ mt: 0.5 }}>
-                  {new Date(msg.timestamp).toLocaleTimeString()}
-                </Typography>
-              </Box>
-            );
-          })
-        )}
+                );
+              })}
+            </Box>
+          );
+        })}
         <div ref={bottomRef} />
       </Paper>
 
       {/* Input */}
-      <Box sx={{ display: "flex", gap: 1, mt: 2, p: 2 }}>
+      <Box
+        component="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
+        sx={{
+          p: 2,
+          bgcolor: "background.paper",
+          boxShadow: 1,
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
         <TextField
           fullWidth
           size="small"
+          variant="outlined"
           placeholder="Type your message…"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyPress={(e) => e.key === "Enter" && handleSend()}
         />
-        <IconButton color="primary" onClick={handleSend}>
+        <IconButton onClick={handleSend} disabled={!text.trim()} sx={{ ml: 1 }}>
           <SendIcon />
         </IconButton>
       </Box>

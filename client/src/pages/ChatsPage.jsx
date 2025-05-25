@@ -1,65 +1,68 @@
-import React, { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+// src/ChatsPage.jsx
+
+import React, { useContext, useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
+
 import Navbar from "../components/Navbar";
+import ScrimChat from "./ScrimChat";
+import { AuthContext } from "../context/AuthContext";
+
 import {
   Box,
   Drawer,
   Toolbar,
+  Typography,
   List,
-  ListItem,
   ListItemButton,
   ListItemText,
   Divider,
-  Typography,
   CircularProgress,
   IconButton,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import ScrimChat from "./ScrimChat";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4444";
-const drawerWidth = 240;
+const drawerWidth = 300;
 
 export default function ChatsPage() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const [chats, setChats] = useState([]);
-  const [selectedChatId, setSelectedChatId] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { chatId } = useParams();
+  const { user } = useContext(AuthContext);
 
-  // load threads
+  const [scrims, setScrims] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Fetch all scrims
   useEffect(() => {
-    (async () => {
+    const fetchScrims = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE}/api/scrims`, {
+        const res = await axios.get("/api/scrims", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) throw new Error("Failed to load chats");
-        const data = await res.json();
-        setChats(data);
-        const initial = location.state?.chatId || data[0]?._id;
-        setSelectedChatId(initial);
+        setScrims(res.data);
       } catch (err) {
-        console.error(err);
+        setError(err.response?.data?.message || err.message);
       } finally {
         setLoading(false);
       }
-    })();
-  }, [location.state]);
+    };
+    fetchScrims();
+  }, []);
 
-  if (loading) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", mt: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  // If no chatId in URL, auto-navigate to first scrim
+  useEffect(() => {
+    if (!chatId && scrims.length > 0) {
+      navigate(`/chats/${scrims[0]._id}`, { replace: true });
+    }
+  }, [chatId, scrims, navigate]);
 
   return (
     <>
       <Navbar />
-      <Box sx={{ display: "flex" }}>
+
+      <Box display="flex" height="calc(100vh - 64px)">
         {/* Sidebar */}
         <Drawer
           variant="permanent"
@@ -93,49 +96,55 @@ export default function ChatsPage() {
             </Box>
           </Toolbar>
           <Divider />
-          <List>
-            {chats.map((scrim) => {
-              const title = `${scrim.teamA.name} vs ${
-                scrim.teamB?.name || "TBD"
-              }`;
-              const secondary = `${new Date(
-                scrim.scheduledTime
-              ).toLocaleString()} — ${scrim.format}`;
-              return (
-                <ListItem key={scrim._id} disablePadding>
+
+          {loading ? (
+            <Box display="flex" justifyContent="center" p={2}>
+              <CircularProgress />
+            </Box>
+          ) : error ? (
+            <Typography color="error" sx={{ p: 2 }}>
+              {error}
+            </Typography>
+          ) : scrims.length === 0 ? (
+            <Typography sx={{ p: 2 }}>No chats yet</Typography>
+          ) : (
+            <List disablePadding>
+              {scrims.map((scrim) => {
+                // Pick the “other” team
+                const opponent =
+                  scrim.teamA._id === user.teamId ? scrim.teamB : scrim.teamA;
+                return (
                   <ListItemButton
-                    selected={scrim._id === selectedChatId}
-                    onClick={() => setSelectedChatId(scrim._id)}
+                    key={scrim._id}
+                    selected={scrim._id === chatId}
+                    onClick={() => navigate(`/chats/${scrim._id}`)}
                   >
-                    <ListItemText primary={title} secondary={secondary} />
+                    <ListItemText
+                      primary={opponent.name}
+                      secondary={`${scrim.format} • ${new Date(
+                        scrim.scheduledTime
+                      ).toLocaleString()}`}
+                    />
                   </ListItemButton>
-                </ListItem>
-              );
-            })}
-          </List>
+                );
+              })}
+            </List>
+          )}
         </Drawer>
 
-        {/* Main chat area */}
-        <Box
-          component="main"
-          sx={{
-            flexGrow: 1,
-            bgcolor: "background.default",
-            p: 3,
-            height: "100vh",
-            overflow: "auto",
-          }}
-        >
-          <Toolbar />
-          {selectedChatId ? (
-            // wrap ScrimChat to control its width from here
-            <Box sx={{ maxWidth: 800, height: 800, mx: "auto" }}>
-              <ScrimChat chatId={selectedChatId} />
-            </Box>
+        {/* Chat pane */}
+        <Box flex={1} display="flex" flexDirection="column">
+          {chatId ? (
+            <ScrimChat chatId={chatId} />
           ) : (
-            <Typography variant="h6" color="textSecondary">
-              Select a chat from the sidebar
-            </Typography>
+            <Box
+              flex={1}
+              display="flex"
+              alignItems="center"
+              justifyContent="center"
+            >
+              <Typography>Select a chat to get started</Typography>
+            </Box>
           )}
         </Box>
       </Box>

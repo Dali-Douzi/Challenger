@@ -16,18 +16,32 @@ import {
 } from "@mui/material";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import ChatIcon from "@mui/icons-material/Chat";
+import PersonIcon from "@mui/icons-material/Person"; // ← fallback icon
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4444";
+const API_BASE = "http://localhost:4444";
+
+// Helper to take up to 2 initials from a display name
+const getInitials = (str) => {
+  if (typeof str !== "string" || !str.trim()) return ""; // ← no more “?”
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((w) => w[0].toUpperCase())
+    .slice(0, 2)
+    .join("");
+};
 
 export default function Navbar() {
   const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  const [avatarAnchor, setAvatarAnchor] = useState(null);
   const [notifAnchor, setNotifAnchor] = useState(null);
+  const [avatarAnchor, setAvatarAnchor] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [notifLoading, setNotifLoading] = useState(false);
 
+  const openNotifMenu = (e) => setNotifAnchor(e.currentTarget);
+  const closeNotifMenu = () => setNotifAnchor(null);
   const openAvatarMenu = (e) => setAvatarAnchor(e.currentTarget);
   const closeAvatarMenu = () => setAvatarAnchor(null);
 
@@ -70,21 +84,14 @@ export default function Navbar() {
           headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
         }
       );
-      setNotifications((prev) =>
-        prev.map((n) => (n._id === notif._id ? { ...n, read: true } : n))
-      );
-      setNotifAnchor(null);
-      if (notif.type === "accept") {
-        navigate("/chats", { state: { chatId: notif.chat._id } });
-      } else {
-        navigate(notif.url || `/scrims/${notif.scrim}/requests`);
-      }
+      closeNotifMenu();
+      if (notif.link) navigate(notif.link);
     } catch (err) {
-      console.error("🔔 mark-as-read error:", err);
+      console.error("Error marking notification read:", err);
     }
   };
 
-  // Mark chat notifications as read then navigate
+  // ← clear all “message” notifications when opening chats :contentReference[oaicite:0]{index=0}
   const handleChatClick = async () => {
     const toMark = chatNotifications.filter((n) => !n.read);
     try {
@@ -110,20 +117,30 @@ export default function Navbar() {
     navigate("/chats");
   };
 
+  // Derive initials (or show person icon)
+  const displayName = (
+    user?.username ||
+    user?.email ||
+    user?.name ||
+    ""
+  ).trim();
+  const initials = getInitials(displayName);
+
   return (
     <AppBar position="static">
       <Toolbar>
-        <Typography variant="h6" sx={{ flexGrow: 1 }}>
+        <Typography
+          variant="h6"
+          sx={{ flexGrow: 1, cursor: "pointer" }}
+          onClick={() => navigate("/")}
+        >
           Challenger
         </Typography>
 
         {user ? (
           <>
-            {/* Notifications Bell (non-chat) */}
-            <IconButton
-              color="inherit"
-              onClick={(e) => setNotifAnchor(e.currentTarget)}
-            >
+            {/* Non-chat notifications */}
+            <IconButton color="inherit" onClick={openNotifMenu}>
               <Badge badgeContent={unreadNotifCount} color="error">
                 <NotificationsIcon />
               </Badge>
@@ -131,44 +148,31 @@ export default function Navbar() {
             <Menu
               anchorEl={notifAnchor}
               open={Boolean(notifAnchor)}
-              onClose={() => setNotifAnchor(null)}
-              PaperProps={{ style: { minWidth: 300 } }}
+              onClose={closeNotifMenu}
             >
-              {notifLoading && (
+              {notifLoading ? (
                 <MenuItem disabled>
                   <CircularProgress size={20} /> Loading…
                 </MenuItem>
-              )}
-              {!notifLoading && nonChatNotifications.length === 0 && (
-                <MenuItem disabled>No new notifications</MenuItem>
-              )}
-              {!notifLoading &&
+              ) : nonChatNotifications.length === 0 ? (
+                <MenuItem disabled>No notifications</MenuItem>
+              ) : (
                 nonChatNotifications.map((n) => (
-                  <MenuItem
-                    key={n._id}
-                    onClick={() => handleNotifClick(n)}
-                    sx={{ alignItems: "flex-start", whiteSpace: "normal" }}
-                  >
-                    <Box>
-                      <Typography variant="body2">{n.message}</Typography>
-                      {n.createdAt && (
-                        <Typography variant="caption" color="textSecondary">
-                          {new Date(n.createdAt).toLocaleString()}
-                        </Typography>
-                      )}
-                    </Box>
+                  <MenuItem key={n._id} onClick={() => handleNotifClick(n)}>
+                    {n.message}
                   </MenuItem>
-                ))}
+                ))
+              )}
             </Menu>
 
-            {/* Chat Icon Button (chat notifications only) */}
+            {/* Chat notifications */}
             <IconButton color="inherit" onClick={handleChatClick}>
               <Badge badgeContent={unreadChatCount} color="error">
                 <ChatIcon />
               </Badge>
             </IconButton>
 
-            {/* Navigation Links */}
+            {/* Nav links */}
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, ml: 2 }}>
               <Link
                 to="/scrims"
@@ -180,19 +184,20 @@ export default function Navbar() {
                 to="/teams"
                 style={{ color: "white", textDecoration: "none" }}
               >
-                Team
+                Teams
+              </Link>
+              <Link
+                to="/chats"
+                style={{ color: "white", textDecoration: "none" }}
+              >
+                Chats
               </Link>
             </Box>
 
-            {/* User Avatar & Menu */}
+            {/* Avatar with initials/Icon fallback */}
             <IconButton color="inherit" onClick={openAvatarMenu}>
-              <Avatar src={user.avatar}>
-                {!user.avatar &&
-                  (user.username || user.email || user.name)
-                    .split(" ")
-                    .map((w) => w[0].toUpperCase())
-                    .slice(0, 2)
-                    .join("")}
+              <Avatar {...(user.avatar ? { src: user.avatar } : {})}>
+                {initials || <PersonIcon fontSize="small" />}
               </Avatar>
             </IconButton>
             <Menu
