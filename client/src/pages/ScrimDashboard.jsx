@@ -25,17 +25,24 @@ const ScrimDashboard = () => {
       return {};
     }
   };
+  // eslint-disable-next-line no-unused-vars
   const { id: userId } = parseJwt(token);
 
   const [teams, setTeams] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState("");
+  const [selectedRequestTeam, setSelectedRequestTeam] = useState("");
   const [games, setGames] = useState([]);
   const [formats, setFormats] = useState([]);
   const [format, setFormat] = useState("");
   const [selectedDay, setSelectedDay] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
   const [scrims, setScrims] = useState([]);
-  const [requested, setRequested] = useState([]); // track which scrims we've requested
+  const [requested, setRequested] = useState([]);
+  const [selectedGameFilter, setSelectedGameFilter] = useState("");
+  const [serverOptions, setServerOptions] = useState([]);
+  const [rankOptions, setRankOptions] = useState([]);
+  const [selectedServerFilter, setSelectedServerFilter] = useState("");
+  const [selectedRankFilter, setSelectedRankFilter] = useState("");
   const [loading, setLoading] = useState({
     teams: true,
     games: true,
@@ -67,6 +74,7 @@ const ScrimDashboard = () => {
       try {
         const res = await fetch("http://localhost:4444/api/games");
         const data = await res.json();
+        console.log("GAMES →", data);
         setGames(data);
       } catch (err) {
         console.error(err);
@@ -76,34 +84,77 @@ const ScrimDashboard = () => {
     })();
   }, []);
 
-  // 3) Update formats when team or games change
+  // Initialize filters from first game
+  useEffect(() => {
+    if (!loading.games && games.length) {
+      const first = games[0];
+      setSelectedGameFilter(first.name);
+      setRankOptions(first.ranks || []);
+      setServerOptions(first.servers || []);
+    }
+  }, [loading.games, games]);
+
+  // 3) Auto-populate when team changes
   useEffect(() => {
     if (!selectedTeam || !teams.length || !games.length) return;
     const team = teams.find((t) => t._id === selectedTeam);
     if (!team) return;
-    const game = games.find((g) => g._id === team.game || g.name === team.game);
-    const fmts = game?.formats || [];
+
+    const gameObj = games.find(
+      (g) => g._id === team.game || g.name === team.game
+    );
+    if (!gameObj) return;
+
+    // Set filters from team
+    setSelectedGameFilter(gameObj.name);
+    setServerOptions(gameObj.servers || []);
+    setRankOptions(gameObj.ranks || []);
+    setSelectedServerFilter(team.server);
+    setSelectedRankFilter(team.rank);
+
+    // Set formats
+    const fmts = gameObj.formats || [];
     setFormats(fmts);
     if (fmts.length) setFormat(fmts[0]);
   }, [selectedTeam, teams, games]);
 
-  // 4) Fetch all scrims
+  // Fetch scrims
   const fetchScrims = async () => {
+    setLoading((l) => ({ ...l, scrims: true }));
     try {
-      const res = await fetch("http://localhost:4444/api/scrims", {
+      const params = new URLSearchParams();
+      if (selectedGameFilter) params.append("game", selectedGameFilter);
+      if (selectedServerFilter) params.append("server", selectedServerFilter);
+      if (selectedRankFilter) params.append("rank", selectedRankFilter);
+      const res = await fetch(`/api/scrims?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      setScrims(data);
+      setScrims(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading((l) => ({ ...l, scrims: false }));
     }
   };
+
+  // Re-fetch whenever filters change
   useEffect(() => {
     fetchScrims();
-  }, [token]);
+  }, [token, selectedGameFilter, selectedServerFilter, selectedRankFilter]);
+
+  // Persist "Request Sent"
+  useEffect(() => {
+    if (!selectedTeam) return;
+    const persisted = scrims
+      .filter((s) =>
+        s.requests?.some((r) =>
+          typeof r === "string" ? r === selectedTeam : r._id === selectedTeam
+        )
+      )
+      .map((s) => s._id);
+    setRequested(persisted);
+  }, [scrims, selectedTeam]);
 
   // Helpers for day/time dropdowns
   const getDayOptions = () => {
@@ -133,7 +184,6 @@ const ScrimDashboard = () => {
       return;
     }
 
-    // build ISO string
     const [h, m] = selectedTime.split(":").map(Number);
     let dt = new Date();
     if (selectedDay === "Tomorrow") dt.setDate(dt.getDate() + 1);
@@ -158,7 +208,6 @@ const ScrimDashboard = () => {
         const err = await res.json();
         throw new Error(err.message || "Failed to post scrim");
       }
-      // reset form + reload
       setSelectedDay("");
       setSelectedTime("");
       await fetchScrims();
@@ -170,14 +219,10 @@ const ScrimDashboard = () => {
     }
   };
 
-  // Send a request to join a scrim (optimistic + error handling)
+  // Send a request to join a scrim
   const handleSendRequest = async (scrimId) => {
-    // prevent double-click
-    if (requested.includes(scrimId)) return;
-
-    // optimistic update
+    if (!selectedRequestTeam || requested.includes(scrimId)) return;
     setRequested((prev) => [...prev, scrimId]);
-
     try {
       const res = await fetch(
         `http://localhost:4444/api/scrims/request/${scrimId}`,
@@ -187,33 +232,37 @@ const ScrimDashboard = () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ teamId: selectedTeam }),
+          body: JSON.stringify({ teamId: selectedRequestTeam }),
         }
       );
       if (!res.ok) {
         const errData = await res.json();
-        // treat duplicate as success
-        if (errData.message === "Scrim request already sent") {
-          return;
-        }
-        console.error("💥 request-error payload:", errData);
+        if (errData.message === "Scrim request already sent") return;
         throw new Error(errData.message || "Failed to send request");
       }
     } catch (err) {
       console.error(err);
       alert(err.message);
-      // revert optimistic update on real error
       setRequested((prev) => prev.filter((id) => id !== scrimId));
     }
   };
 
-  // Edit scrim flows you already had
+  // Edit scrim handler
   const handleEditScrim = (scrimId) => {
     localStorage.setItem("editingScrimId", scrimId);
     window.location.href = "/scrims/edit";
   };
 
-  // loading screen
+  // Game filter change
+  const handleGameChange = (gameName) => {
+    setSelectedGameFilter(gameName);
+    const game = games.find((g) => g.name === gameName) || {};
+    setServerOptions(game.servers || []);
+    setRankOptions(game.ranks || []);
+    setSelectedServerFilter("");
+    setSelectedRankFilter("");
+  };
+
   if (loading.teams || loading.games || loading.scrims) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
@@ -239,7 +288,6 @@ const ScrimDashboard = () => {
             onSubmit={handlePostScrim}
             sx={{ display: "grid", gap: 2 }}
           >
-            {/* Team */}
             <FormControl fullWidth>
               <InputLabel id="team-select-label">Team</InputLabel>
               <Select
@@ -256,7 +304,6 @@ const ScrimDashboard = () => {
               </Select>
             </FormControl>
 
-            {/* Format */}
             <FormControl fullWidth>
               <InputLabel id="format-select-label">Format</InputLabel>
               <Select
@@ -273,7 +320,6 @@ const ScrimDashboard = () => {
               </Select>
             </FormControl>
 
-            {/* Day */}
             <FormControl fullWidth>
               <InputLabel id="day-select-label">Day</InputLabel>
               <Select
@@ -290,7 +336,6 @@ const ScrimDashboard = () => {
               </Select>
             </FormControl>
 
-            {/* Time */}
             <FormControl fullWidth>
               <InputLabel id="time-select-label">Time</InputLabel>
               <Select
@@ -308,8 +353,8 @@ const ScrimDashboard = () => {
             </FormControl>
 
             <Button
-              type="submit"
               variant="contained"
+              type="submit"
               disabled={loading.posting}
             >
               {loading.posting ? "Posting..." : "Post Scrim"}
@@ -317,21 +362,97 @@ const ScrimDashboard = () => {
           </Box>
         </Paper>
 
+        {/* Filters */}
+        <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+          <FormControl sx={{ minWidth: 150 }}>
+            <InputLabel id="game-filter-label">Game</InputLabel>
+            <Select
+              labelId="game-filter-label"
+              value={selectedGameFilter}
+              onChange={(e) => handleGameChange(e.target.value)}
+              label="Game"
+            >
+              <MenuItem value="">
+                <em>All</em>
+              </MenuItem>
+              {games.map((g) => (
+                <MenuItem key={g._id} value={g.name}>
+                  {g.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl sx={{ minWidth: 150 }}>
+            <InputLabel id="server-filter-label">Server</InputLabel>
+            <Select
+              labelId="server-filter-label"
+              value={selectedServerFilter}
+              onChange={(e) => setSelectedServerFilter(e.target.value)}
+              label="Server"
+            >
+              <MenuItem value="">
+                <em>All</em>
+              </MenuItem>
+              {serverOptions.map((srv) => (
+                <MenuItem key={srv} value={srv}>
+                  {srv}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl sx={{ minWidth: 150 }}>
+            <InputLabel id="rank-filter-label">Rank</InputLabel>
+            <Select
+              labelId="rank-filter-label"
+              value={selectedRankFilter}
+              onChange={(e) => setSelectedRankFilter(e.target.value)}
+              label="Rank"
+            >
+              <MenuItem value="">
+                <em>All</em>
+              </MenuItem>
+              {rankOptions.map((rk) => (
+                <MenuItem key={rk} value={rk}>
+                  {rk}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+
         {/* All Scrims */}
         <Typography variant="h6" gutterBottom>
           All Scrims
         </Typography>
-        {scrims.length === 0 ? (
+
+        {/* Requesting team selector */}
+        <FormControl fullWidth sx={{ mb: 2 }}>
+          <InputLabel id="requesting-team-label">Requesting As</InputLabel>
+          <Select
+            labelId="requesting-team-label"
+            value={selectedRequestTeam}
+            label="Requesting As"
+            onChange={(e) => setSelectedRequestTeam(e.target.value)}
+          >
+            <MenuItem value="">
+              <em>Choose a team</em>
+            </MenuItem>
+            {teams.map((t) => (
+              <MenuItem key={t._id} value={t._id}>
+                {t.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {!Array.isArray(scrims) || scrims.length === 0 ? (
           <Typography>No scrims found.</Typography>
         ) : (
           <List>
             {scrims.map((s) => {
               const isOwnTeam = s.teamA?._id === selectedTeam;
-              const teamObj = teams.find((t) => t._id === s.teamA?._id);
-              const member = teamObj?.members?.find(
-                (m) => m.user._id === userId
-              );
-              const role = member?.role;
               const hasRequested = requested.includes(s._id);
 
               let btnText = "";
@@ -342,43 +463,44 @@ const ScrimDashboard = () => {
                 btnText = "Booked";
                 btnDisabled = true;
               } else if (isOwnTeam) {
-                if (role === "owner" || role === "manager") {
-                  btnText = "Edit";
-                  btnAction = () => handleEditScrim(s._id);
-                } else {
-                  btnText = "Posted";
-                  btnDisabled = true;
-                }
+                btnText = "Edit";
+                btnAction = () => handleEditScrim(s._id);
               } else if (hasRequested) {
                 btnText = "Request Sent";
                 btnDisabled = true;
               } else {
                 btnText = "Send Request";
+                btnDisabled = !selectedRequestTeam;
                 btnAction = () => handleSendRequest(s._id);
               }
+
+              const title = s.teamB?.name
+                ? `${s.teamA?.name} vs ${s.teamB.name}`
+                : s.teamA?.name || "Unknown";
 
               return (
                 <ListItem
                   key={s._id}
                   divider
-                  secondaryAction={
-                    <Button
-                      variant="outlined"
-                      onClick={btnAction}
-                      disabled={!btnAction || btnDisabled}
-                    >
-                      {btnText}
-                    </Button>
-                  }
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
                 >
                   <ListItemText
-                    primary={`${s.teamA?.name || "Unknown"} vs ${
-                      s.teamB?.name || "TBD"
-                    }`}
+                    primary={title}
                     secondary={`Format: ${s.format} | Time: ${new Date(
                       s.scheduledTime
                     ).toLocaleString()} | Status: ${s.status}`}
                   />
+                  <Button
+                    variant="outlined"
+                    onClick={btnAction}
+                    disabled={btnDisabled}
+                  >
+                    {btnText}
+                  </Button>
                 </ListItem>
               );
             })}

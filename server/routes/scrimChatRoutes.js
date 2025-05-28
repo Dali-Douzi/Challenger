@@ -1,51 +1,51 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const ScrimChat = require("../models/ScrimChat");
-const Scrim = require("../models/Scrim");
 const Team = require("../models/Team");
 const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
 /**
- * Only allow access if the user is the owner or a member of any involved team:
- *  - teamA
- *  - any team in scrim.requests
- *  - teamB (if set)
+ * @desc   List all chat threads involving any of this user’s teams
+ * @route  GET /api/scrims/chat
+ * @access Private
  */
-async function canAccessChat(userId, scrim) {
-  const teamIds = [scrim.teamA];
+router.get("/", protect, async (req, res) => {
+  try {
+    // 1) Gather all the team IDs this user belongs to
+    const teams = await Team.find({
+      $or: [{ owner: req.user.id }, { "members.user": req.user.id }],
+    }).select("_id");
+    const teamIds = teams.map((t) => t._id);
 
-  if (Array.isArray(scrim.requests) && scrim.requests.length) {
-    teamIds.push(...scrim.requests);
+    // 2) Find all chat threads where they’re owner OR challenger
+    const chats = await ScrimChat.find({
+      $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
+    })
+      .populate("owner", "name")
+      .populate("challenger", "name")
+      .populate({
+        path: "scrim",
+        select: "scheduledTime format teamA teamB",
+        populate: [
+          { path: "teamA", select: "name" },
+          { path: "teamB", select: "name" },
+        ],
+      })
+      .sort({ "scrim.scheduledTime": 1 });
+
+    res.json(chats);
+  } catch (err) {
+    console.error("🔥 Chat-list Error:", err);
+    res.status(500).json({ message: "Server error" });
   }
-  if (scrim.teamB) {
-    teamIds.push(scrim.teamB);
-  }
-
-  for (const teamId of teamIds) {
-    const team = await Team.findById(teamId);
-    if (!team) continue;
-
-    // Owner check
-    if (team.owner.toString() === userId) {
-      return true;
-    }
-    // Membership check
-    if (
-      Array.isArray(team.members) &&
-      team.members.some((m) => m.user.toString() === userId)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
+});
 
 /**
- * GET /api/scrims/chat/:scrimId?limit=&skip=
- * Fetch chat history (oldest→newest), paginated.
+ * @desc   Fetch chat history for this user’s chat thread
+ * @route  GET /api/scrims/chat/:scrimId
+ * @access Private
  */
 router.get("/:scrimId", protect, async (req, res) => {
   const { scrimId } = req.params;
@@ -56,20 +56,17 @@ router.get("/:scrimId", protect, async (req, res) => {
     return res.status(400).json({ message: "Invalid scrim ID format" });
   }
 
-  const scrim = await Scrim.findById(scrimId);
-  if (!scrim) {
-    return res.status(404).json({ message: "Scrim not found" });
-  }
+  // 1) Gather this user’s team IDs
+  const teams = await Team.find({
+    $or: [{ owner: req.user.id }, { "members.user": req.user.id }],
+  }).select("_id");
+  const teamIds = teams.map((t) => t._id);
 
-  if (!(await canAccessChat(req.user.id, scrim))) {
-    return res.status(403).json({ message: "Not authorized to access chat" });
-  }
-
-  // **Populate sender details on each message**
-  const chat = await ScrimChat.findOne({ scrim: scrimId }).populate(
-    "messages.sender",
-    "username avatar"
-  );
+  // 2) Fetch only the chat where they’re owner OR challenger
+  let chat = await ScrimChat.findOne({
+    scrim: mongoose.Types.ObjectId(scrimId),
+    $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
+  }).populate("messages.sender", "username avatar");
 
   if (!chat) {
     return res.json({ messages: [] });
@@ -84,8 +81,9 @@ router.get("/:scrimId", protect, async (req, res) => {
 });
 
 /**
- * POST /api/scrims/chat/:scrimId
- * Send a new message.
+ * @desc   Send a new message in a chat thread
+ * @route  POST /api/scrims/chat/:scrimId
+ * @access Private
  */
 router.post("/:scrimId", protect, async (req, res) => {
   const { scrimId } = req.params;
@@ -98,19 +96,22 @@ router.post("/:scrimId", protect, async (req, res) => {
     return res.status(400).json({ message: "Invalid scrim ID format" });
   }
 
-  const scrim = await Scrim.findById(scrimId);
-  if (!scrim) {
-    return res.status(404).json({ message: "Scrim not found" });
-  }
-  if (!(await canAccessChat(req.user.id, scrim))) {
-    return res.status(403).json({ message: "Not authorized to send messages" });
-  }
+  // 1) Gather this user’s team IDs
+  const teams = await Team.find({
+    $or: [{ owner: req.user.id }, { "members.user": req.user.id }],
+  }).select("_id");
+  const teamIds = teams.map((t) => t._id);
 
-  let chat = await ScrimChat.findOne({ scrim: scrimId });
+  // 2) Find the correct chat thread
+  let chat = await ScrimChat.findOne({
+    scrim: mongoose.Types.ObjectId(scrimId),
+    $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
+  });
   if (!chat) {
-    chat = await ScrimChat.create({ scrim: scrimId, messages: [] });
+    return res.status(404).json({ message: "Chat thread not found" });
   }
 
+  // 3) Append and save the message
   const msg = {
     sender: req.user.id,
     text,

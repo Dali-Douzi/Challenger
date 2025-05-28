@@ -1,7 +1,6 @@
-// src/pages/TeamDashboard.jsx
-
 import React, { useEffect, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import JoinTeamModal from "../components/JoinTeamModal";
 import {
   Box,
   Typography,
@@ -12,6 +11,7 @@ import {
   CircularProgress,
   Container,
   Paper,
+  Button,
 } from "@mui/material";
 
 const TeamDashboard = () => {
@@ -19,6 +19,8 @@ const TeamDashboard = () => {
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
@@ -41,6 +43,18 @@ const TeamDashboard = () => {
     })();
   }, [token]);
 
+  const handleCreateTeam = () => {
+    navigate("/create-team");
+  };
+
+  const handleJoinTeam = () => {
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+  };
+
   if (loading) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
@@ -55,6 +69,20 @@ const TeamDashboard = () => {
         <Typography variant="h5" gutterBottom>
           Your Teams
         </Typography>
+
+        {/* Action buttons */}
+        <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleCreateTeam}
+          >
+            + Create New Team
+          </Button>
+          <Button variant="outlined" color="secondary" onClick={handleJoinTeam}>
+            Join a Team
+          </Button>
+        </Box>
 
         {error && (
           <Typography color="error" gutterBottom>
@@ -71,10 +99,7 @@ const TeamDashboard = () => {
             <List>
               {teams.map((team) => (
                 <ListItem key={team._id} disablePadding divider>
-                  <ListItemButton
-                    component={RouterLink}
-                    to={`/teams/${team._id}`}
-                  >
+                  <ListItemButton component="a" href={`/teams/${team._id}`}>
                     <ListItemText
                       primary={team.name}
                       secondary={`Game: ${team.game} | Rank: ${team.rank}`}
@@ -85,6 +110,8 @@ const TeamDashboard = () => {
             </List>
           </Paper>
         )}
+
+        <JoinTeamModal isOpen={isModalOpen} closeModal={closeModal} />
       </Box>
     </Container>
   );

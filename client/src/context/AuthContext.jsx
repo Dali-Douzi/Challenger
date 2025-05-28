@@ -1,54 +1,44 @@
 // @ts-nocheck
-import React, { createContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
 import axios from "axios";
 
 export const AuthContext = createContext(null);
 
-// Simple JWT payload decoder (no external lib)
-function decodeJWT(token) {
-  try {
-    // Grab the middle "payload" slice
-    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    // Decode base64 to JSON string
-    const json = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => `%${("00" + c.charCodeAt(0).toString(16)).slice(-2)}`)
-        .join("")
-    );
-    return JSON.parse(json);
-  } catch (err) {
-    console.error("Failed to decode JWT:", err);
-    return {};
-  }
+// Custom hook for accessing auth context
+export function useAuth() {
+  return useContext(AuthContext);
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // On mount: read token, set header, decode payload
+  // Initialize authentication on mount
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      const decoded = decodeJWT(token);
-      if (decoded && decoded.id) {
-        setUser({
-          id: decoded.id || decoded._id || decoded.userId,
-          username: decoded.username,
-          avatar: decoded.avatar,
-          token,
-        });
-      } else {
-        // invalid token
-        localStorage.removeItem("token");
+    const initializeAuth = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setLoading(false);
+        return;
       }
-    }
-    setLoading(false);
+
+      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+
+      try {
+        const { data: profileData } = await axios.get("/api/auth/profile");
+        console.log("Profile data on init:", profileData);
+        setUser({ ...profileData, token });
+      } catch (err) {
+        console.error("Failed to fetch profile:", err);
+        localStorage.removeItem("token");
+      } finally {
+        setLoading(false);
+      }
+    };
+    initializeAuth();
   }, []);
 
-  // Call to log in
+  // Login
   const login = async (email, password) => {
     try {
       const res = await axios.post("/api/auth/login", { email, password });
@@ -56,13 +46,8 @@ export function AuthProvider({ children }) {
       localStorage.setItem("token", token);
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-      const decoded = decodeJWT(token);
-      setUser({
-        id: decoded.id || decoded._id || decoded.userId,
-        username: decoded.username,
-        avatar: decoded.avatar,
-        token,
-      });
+      const { data: profileData } = await axios.get("/api/auth/profile");
+      setUser({ ...profileData, token });
       return true;
     } catch (err) {
       console.error("Login failed:", err.response?.data || err.message);
@@ -70,15 +55,68 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Call to log out
+  // Logout
   const logout = () => {
     delete axios.defaults.headers.common["Authorization"];
     localStorage.removeItem("token");
     setUser(null);
   };
 
+  // Update username
+  const updateUsername = async (newUsername, currentPassword) => {
+    const res = await axios.patch(`/api/users/${user.id}/username`, {
+      username: newUsername,
+      currentPassword,
+    });
+    setUser((prev) => ({ ...prev, username: res.data.username }));
+  };
+
+  // Update email
+  const updateEmail = async (newEmail, currentPassword) => {
+    const res = await axios.patch(`/api/users/${user.id}/email`, {
+      email: newEmail,
+      currentPassword,
+    });
+    setUser((prev) => ({ ...prev, email: res.data.email }));
+  };
+
+  // Update password
+  const updatePassword = async (oldPassword, newPassword) => {
+    await axios.patch(`/api/users/${user.id}/password`, {
+      oldPassword,
+      newPassword,
+    });
+  };
+
+  // Update avatar via auth route, then re-fetch profile
+  const updateAvatar = async (file) => {
+    const formData = new FormData();
+    formData.append("avatar", file);
+    try {
+      await axios.put("/api/auth/avatar", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const { data: profileData } = await axios.get("/api/auth/profile");
+      console.log("Profile data after avatar update:", profileData);
+      setUser({ ...profileData, token: user.token });
+    } catch (err) {
+      console.error("Avatar update error:", err);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        updateUsername,
+        updateEmail,
+        updatePassword,
+        updateAvatar,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,6 @@
 import { useContext, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   TextField,
   Button,
@@ -30,7 +30,7 @@ const Signup = () => {
     });
 
     if (res.ok) {
-      const success = await login(email, password); // wait for login to succeed
+      const success = await login(email, password);
       if (success) {
         navigate("/dashboard");
       } else {
@@ -56,30 +56,37 @@ const Signup = () => {
           <TextField
             label="Username"
             value={username}
-            onChange={(event) => setUsername(event.target.value)}
+            onChange={(e) => setUsername(e.target.value)}
             fullWidth
             variant="filled"
+            required
           />
           <TextField
             label="Email"
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
             fullWidth
             variant="filled"
+            required
           />
           <TextField
             label="Password"
             type="password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(e) => setPassword(e.target.value)}
             fullWidth
             variant="filled"
+            required
           />
           <Button type="submit" variant="contained" color="primary">
             Sign Up
           </Button>
         </Box>
+
+        <Typography variant="body2" align="center" sx={{ mt: 2 }}>
+          Already have an account? <Link to="/login">Login</Link>
+        </Typography>
       </Paper>
     </Container>
   );

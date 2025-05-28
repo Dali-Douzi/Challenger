@@ -10,8 +10,7 @@ module.exports = (io) => {
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) {
-      const err = new Error("Authentication error: token required");
-      return next(err);
+      return next(new Error("Authentication error: token required"));
     }
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -27,37 +26,32 @@ module.exports = (io) => {
     console.log(`🟢 Socket connected: ${socket.id} (user ${socket.userId})`);
 
     /**
-     * Join a scrim chat room if user belongs to any involved team
+     * Join a chat room by its Chat ID (not the scrim ID).
+     * Ensures the user’s team is either owner or challenger.
      */
     socket.on("joinRoom", async (scrimId) => {
       try {
+        // Load the scrim and find the chat thread for this user
         const scrim = await Scrim.findById(scrimId);
         if (!scrim) return socket.emit("error", "Scrim not found");
 
-        // Gather all team IDs with access
-        const teamIds = [scrim.teamA.toString()];
-        if (Array.isArray(scrim.requests)) {
-          scrim.requests.forEach((id) => teamIds.push(id.toString()));
-        }
-        if (scrim.teamB) teamIds.push(scrim.teamB.toString());
+        // Build list of this user’s team IDs
+        const teams = await Team.find({
+          $or: [{ owner: socket.userId }, { "members.user": socket.userId }],
+        }).select("_id");
+        const teamIds = teams.map((t) => t._id.toString());
 
-        // Check if user belongs to one of these teams
-        let allowed = false;
-        for (const tId of teamIds) {
-          const team = await Team.findById(tId);
-          if (!team) continue;
-          if (
-            team.owner.toString() === socket.userId ||
-            team.members.some((m) => m.user.toString() === socket.userId)
-          ) {
-            allowed = true;
-            break;
-          }
+        // Fetch the one-to-one chat thread
+        const chat = await ScrimChat.findOne({
+          scrim,
+          $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
+        });
+        if (!chat) {
+          return socket.emit("error", "Chat thread not created");
         }
-        if (!allowed)
-          return socket.emit("error", "Not authorized for this chat");
 
-        socket.join(scrimId);
+        // Join the room named after the Chat’s _id
+        socket.join(chat._id.toString());
       } catch (err) {
         console.error("joinRoom error:", err);
         socket.emit("error", "Server error joining room");
@@ -65,56 +59,58 @@ module.exports = (io) => {
     });
 
     /**
-     * Handle sending a new chat message and generate notifications
+     * Handle sending a new message.
+     * Broadcasts to the Chat ID room, and notifies the other team.
      */
     socket.on("sendMessage", async ({ scrimId, text }) => {
       if (!scrimId || !text) {
         return socket.emit("error", "Scrim ID and text are required");
       }
       try {
-        // Ensure the client has joined the room
-        if (!io.sockets.adapter.rooms.has(scrimId)) {
+        // Find this user’s team IDs
+        const teams = await Team.find({
+          $or: [{ owner: socket.userId }, { "members.user": socket.userId }],
+        }).select("_id");
+        const teamIds = teams.map((t) => t._id.toString());
+
+        // Fetch the chat for this scrim scoped to the user
+        const chat = await ScrimChat.findOne({
+          scrim: mongoose.Types.ObjectId(scrimId),
+          $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
+        });
+        if (!chat) {
+          return socket.emit("error", "Chat thread not found");
+        }
+
+        const room = chat._id.toString();
+        // Ensure the client has joined the correct chat room
+        if (!io.sockets.adapter.rooms.has(room)) {
           return socket.emit("error", "You must join the room first");
         }
 
         // Persist the message
-        let chat = await ScrimChat.findOne({ scrim: scrimId });
-        if (!chat) chat = new ScrimChat({ scrim: scrimId, messages: [] });
-        const msg = { sender: socket.userId, text, timestamp: new Date() };
+        const msg = {
+          sender: socket.userId,
+          text,
+          timestamp: new Date(),
+        };
         chat.messages.push(msg);
         await chat.save();
 
+        // Populate sender details for broadcast
         const senderUser = await User.findById(socket.userId).select(
           "username avatar"
         );
 
-        // Load scrim to identify recipient teams
-        const scrim = await Scrim.findById(scrimId);
-        const allTeams = [
-          scrim.teamA.toString(),
-          ...(Array.isArray(scrim.requests)
-            ? scrim.requests.map((id) => id.toString())
-            : []),
-          ...(scrim.teamB ? [scrim.teamB.toString()] : []),
-        ];
+        // Determine the recipient team(s): chat.owner and chat.challenger
+        const recipientTeamIds = [
+          chat.owner.toString(),
+          chat.challenger.toString(),
+        ].filter((tid) => tid !== teamIds.find((id) => id === tid));
 
-        // Determine sender's team
-        let senderTeam = null;
-        for (const tId of allTeams) {
-          const team = await Team.findById(tId);
-          if (
-            team.owner.toString() === socket.userId ||
-            team.members.some((m) => m.user.toString() === socket.userId)
-          ) {
-            senderTeam = tId;
-            break;
-          }
-        }
-
-        // Notify all other teams
-        const recipients = allTeams.filter((id) => id !== senderTeam);
+        // Create notifications for the other party
         await Promise.all(
-          recipients.map((teamId) =>
+          recipientTeamIds.map((teamId) =>
             Notification.create({
               team: teamId,
               scrim: scrimId,
@@ -126,10 +122,10 @@ module.exports = (io) => {
           )
         );
 
-        // Broadcast to room
-        io.to(scrimId).emit("newMessage", {
-          ...msg, // spreads sender, text, timestamp
-          sender: senderUser, // the full user object
+        // Broadcast to the chat room
+        io.to(room).emit("newMessage", {
+          ...msg,
+          sender: senderUser,
         });
       } catch (err) {
         console.error("sendMessage error:", err);

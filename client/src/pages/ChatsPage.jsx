@@ -1,5 +1,3 @@
-// src/ChatsPage.jsx
-
 import React, { useContext, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
@@ -26,37 +24,38 @@ const drawerWidth = 300;
 
 export default function ChatsPage() {
   const navigate = useNavigate();
-  const { chatId } = useParams();
+  const { scrimId } = useParams();
   const { user } = useContext(AuthContext);
+  const currentTeamId = user.teamId;
 
-  const [scrims, setScrims] = useState([]);
+  const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Fetch all scrims
+  // Load all chat threads for this user’s teams
   useEffect(() => {
-    const fetchScrims = async () => {
+    const fetchChats = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await axios.get("/api/scrims", {
+        const res = await axios.get("/api/scrims/chat", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setScrims(res.data);
+        setChats(res.data);
       } catch (err) {
         setError(err.response?.data?.message || err.message);
       } finally {
         setLoading(false);
       }
     };
-    fetchScrims();
+    fetchChats();
   }, []);
 
-  // If no chatId in URL, auto-navigate to first scrim
+  // Default-select the first chat if none chosen
   useEffect(() => {
-    if (!chatId && scrims.length > 0) {
-      navigate(`/chats/${scrims[0]._id}`, { replace: true });
+    if (!scrimId && chats.length > 0) {
+      navigate(`/chats/${chats[0].scrim._id}`, { replace: true });
     }
-  }, [chatId, scrims, navigate]);
+  }, [scrimId, chats, navigate]);
 
   return (
     <>
@@ -105,25 +104,29 @@ export default function ChatsPage() {
             <Typography color="error" sx={{ p: 2 }}>
               {error}
             </Typography>
-          ) : scrims.length === 0 ? (
+          ) : chats.length === 0 ? (
             <Typography sx={{ p: 2 }}>No chats yet</Typography>
           ) : (
             <List disablePadding>
-              {scrims.map((scrim) => {
-                // Pick the “other” team
+              {chats.map((chat) => {
+                // Determine the opposing team
                 const opponent =
-                  scrim.teamA._id === user.teamId ? scrim.teamB : scrim.teamA;
+                  chat.owner._id === currentTeamId
+                    ? chat.challenger
+                    : chat.owner;
+                const time = new Date(
+                  chat.scrim.scheduledTime
+                ).toLocaleString();
+                const id = chat.scrim._id; // URL param is the scrim ID
                 return (
                   <ListItemButton
-                    key={scrim._id}
-                    selected={scrim._id === chatId}
-                    onClick={() => navigate(`/chats/${scrim._id}`)}
+                    key={chat._id}
+                    selected={id === scrimId}
+                    onClick={() => navigate(`/chats/${id}`)}
                   >
                     <ListItemText
                       primary={opponent.name}
-                      secondary={`${scrim.format} • ${new Date(
-                        scrim.scheduledTime
-                      ).toLocaleString()}`}
+                      secondary={`${chat.scrim.format} • ${time}`}
                     />
                   </ListItemButton>
                 );
@@ -134,8 +137,8 @@ export default function ChatsPage() {
 
         {/* Chat pane */}
         <Box flex={1} display="flex" flexDirection="column">
-          {chatId ? (
-            <ScrimChat chatId={chatId} />
+          {scrimId ? (
+            <ScrimChat />
           ) : (
             <Box
               flex={1}

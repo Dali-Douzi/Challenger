@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Navbar from "../components/Navbar";
 import { useParams } from "react-router-dom";
 import {
   Box,
@@ -59,61 +60,70 @@ const TeamProfile = () => {
   }
 
   return (
-    <Container maxWidth="md">
-      <Box sx={{ p: 4 }}>
-        {/* Banner */}
-        {team.banner && (
-          <Box
-            component="img"
-            src={team.banner}
-            alt="Team Banner"
-            sx={{
-              width: "100%",
-              height: 200,
-              objectFit: "cover",
-              borderRadius: 1,
-              mb: 3,
-            }}
-          />
-        )}
-
-        {/* Logo & Basic Info */}
-        <Box sx={{ display: "flex", alignItems: "center", mb: 4 }}>
-          {team.logo && (
-            <Avatar
-              src={team.logo}
-              alt={team.name}
-              sx={{ width: 80, height: 80, mr: 2 }}
+    <>
+      <Navbar></Navbar>
+      <Container maxWidth="md">
+        <Box sx={{ color: "white", p: 4 }}>
+          {/* Banner */}
+          {team.banner && (
+            <Box
+              component="img"
+              src={team.banner}
+              alt="Team Banner"
+              sx={{
+                width: "100%",
+                height: 200,
+                objectFit: "cover",
+                borderRadius: 1,
+                mb: 3,
+              }}
             />
           )}
-          <Box>
-            <Typography variant="h4">{team.name}</Typography>
-            <Typography variant="subtitle1" color="textSecondary">
-              Game: {team.game} | Rank: {team.rank}
-            </Typography>
-          </Box>
-        </Box>
 
-        {/* Members List */}
-        <Paper sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            Members
-          </Typography>
-          <List>
-            {team.members.map(({ user, role }) => (
-              <ListItem key={user._id} divider>
-                <ListItemAvatar>
-                  <Avatar src={user.avatar} alt={user.username}>
-                    {user.username[0]}
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText primary={user.username} secondary={role} />
-              </ListItem>
-            ))}
-          </List>
-        </Paper>
-      </Box>
-    </Container>
+          {/* Logo & Basic Info */}
+          <Box sx={{ display: "flex", alignItems: "center", mb: 4 }}>
+            {team.logo && (
+              <Avatar
+                src={team.logo}
+                alt={team.name}
+                sx={{ width: 80, height: 80, mr: 2 }}
+              />
+            )}
+            <Box>
+              <Typography variant="h4">{team.name}</Typography>
+              <Typography
+                variant="subtitle2"
+                sx={{ color: "white", mt: 1, mb: 1 }}
+              >
+                Join Code: <strong>{team.teamCode}</strong>
+              </Typography>
+              <Typography variant="subtitle1" color="textSecondary">
+                Game: {team.game} | Rank: {team.rank}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Members List */}
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Members
+            </Typography>
+            <List>
+              {team.members.map(({ user, role }) => (
+                <ListItem key={user._id} divider>
+                  <ListItemAvatar>
+                    <Avatar src={user.avatar} alt={user.username}>
+                      {user.username[0]}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText primary={user.username} secondary={role} />
+                </ListItem>
+              ))}
+            </List>
+          </Paper>
+        </Box>
+      </Container>
+    </>
   );
 };
 

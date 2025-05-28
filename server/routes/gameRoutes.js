@@ -1,11 +1,13 @@
 const express = require("express");
 const Game = require("../models/Game");
-
 const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const games = await Game.find();
+    const games = await Game.find(
+      {},
+      { name: 1, servers: 1, ranks: 1, formats: 1 }
+    );
     res.json(games);
   } catch (error) {
     console.error("Fetch Games Error:", error);

@@ -1,6 +1,6 @@
 import { useContext, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   TextField,
   Button,
@@ -45,7 +45,7 @@ const Login = () => {
             label="Email"
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
             fullWidth
             variant="filled"
             required
@@ -54,7 +54,7 @@ const Login = () => {
             label="Password"
             type="password"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(e) => setPassword(e.target.value)}
             fullWidth
             variant="filled"
             required
@@ -68,6 +68,10 @@ const Login = () => {
             Login
           </Button>
         </Box>
+
+        <Typography variant="body2" align="center" sx={{ mt: 2 }}>
+          Don’t have an account? <Link to="/signup">Sign Up</Link>
+        </Typography>
       </Paper>
     </Container>
   );

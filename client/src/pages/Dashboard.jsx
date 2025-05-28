@@ -1,242 +1,208 @@
-import { useContext, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { AuthContext } from "../context/AuthContext";
-import {
-  Button,
-  TextField,
-  Box,
-  Typography,
-  Container,
-  Avatar,
-  Paper,
-  Grid,
-} from "@mui/material";
-import JoinTeamModal from "../components/JoinTeamModal";
 import React from "react";
+import { useNavigate } from "react-router-dom";
+import { Box, Typography, Button, Container } from "@mui/material";
 
 const Dashboard = () => {
-  const { user, setUser } = useContext(AuthContext);
   const navigate = useNavigate();
-  const [teams, setTeams] = useState([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newEmail, setNewEmail] = useState(user?.email || "");
-  const [newPassword, setNewPassword] = useState("");
-  const [avatarPreview, setAvatarPreview] = useState(user?.avatar || "");
-  const [avatarFile, setAvatarFile] = useState(null);
-
-  useEffect(() => {
-    const fetchTeams = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await fetch("http://localhost:4444/api/teams/my", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        const data = await res.json();
-        setTeams(Array.isArray(data) ? data : [data]);
-      } catch (err) {
-        console.error("Failed to load teams:", err);
-      }
-    };
-
-    fetchTeams();
-  }, []);
-
-  const handleCreateTeam = () => {
-    navigate("/create-team");
-  };
-
-  const handleViewTeam = (teamId) => {
-    navigate(`/team-dashboard/${teamId}`);
-  };
-
-  const handleUpdate = async (event) => {
-    event.preventDefault();
-    const token = localStorage.getItem("token");
-
-    try {
-      const res = await fetch("http://localhost:4444/api/auth/update", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          email: newEmail,
-          password: newPassword || undefined,
-        }),
-      });
-
-      if (res.ok) {
-        const updatedUser = await res.json();
-        setUser((prev) => ({ ...prev, email: updatedUser.email }));
-        alert("Profile updated successfully!");
-        setNewPassword("");
-      } else {
-        const data = await res.json();
-        alert(data.message || "Update failed");
-      }
-    } catch (err) {
-      console.error("Update error:", err);
-      alert("Server error");
-    }
-  };
-
-  const handleAvatarUpload = async (event) => {
-    event.preventDefault();
-    if (!avatarFile) return alert("Please select a file first.");
-
-    const formData = new FormData();
-    formData.append("avatar", avatarFile);
-
-    try {
-      const token = localStorage.getItem("token");
-      const res = await fetch("http://localhost:4444/api/auth/avatar", {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setUser((prev) => ({ ...prev, avatar: data.avatar }));
-        alert("Avatar uploaded successfully!");
-      } else {
-        alert("Upload failed.");
-      }
-    } catch (err) {
-      console.error("Avatar upload error:", err);
-      alert("Server error.");
-    }
-  };
-
-  const handleJoinTeam = () => {
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
-
-  if (!user) return <p>Loading user...</p>;
 
   return (
-    <Container maxWidth="sm">
-      <Paper sx={{ padding: 4, mt: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          User Dashboard
-        </Typography>
-
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6">
-            <strong>Email:</strong> {user.email}
+    <Box
+      sx={{
+        minHeight: "100vh",
+        backgroundColor: "background.default",
+        color: "text.primary",
+      }}
+    >
+      {/* Hero Section */}
+      <Container maxWidth="lg">
+        <Box sx={{ py: 10, textAlign: "center" }}>
+          <Typography variant="h2" sx={{ fontWeight: "bold", mb: 3 }}>
+            Welcome to{" "}
+            <Box component="span" sx={{ color: "primary.main" }}>
+              Challenger{" "}
+            </Box>
+            <br />
+            The Ultimate Esports Platform
           </Typography>
-          <Typography variant="h6">
-            <strong>Username:</strong> {user.username}
+          <Typography variant="h6" sx={{ color: "text.secondary", mb: 4 }}>
+            Join teams, practice in scrims, and compete in tournaments
           </Typography>
         </Box>
 
-        {/* Avatar Section */}
-        <Box sx={{ mb: 3, textAlign: "center" }}>
-          <Typography variant="h6">Profile Picture</Typography>
-          {avatarPreview || user.avatar ? (
-            <Avatar
-              src={avatarPreview || user.avatar}
-              sx={{ width: 100, height: 100, mx: "auto" }}
-            />
-          ) : (
-            <Typography>No avatar uploaded.</Typography>
-          )}
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(event) => {
-              const file = event.target.files[0];
-              setAvatarFile(file);
-              setAvatarPreview(URL.createObjectURL(file));
+        {/* Main 3 Sections */}
+        <Box sx={{ pb: 8 }}>
+          {/* Teams Section */}
+          <Box
+            sx={{
+              position: "relative",
+              overflow: "hidden",
+              py: 6,
+              textAlign: "center",
+              backgroundColor: "rgba(0, 255, 255, 0.1)", // primary.main 10% opacity
+              borderRadius: 2,
+              mb: 4,
+              border: "1px solid",
+              borderColor: "primary.main",
+              "&::before": {
+                content: '""',
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                backgroundImage: 'url("/images/teams-bg.jpg")',
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                opacity: 0.2,
+                zIndex: 0,
+              },
             }}
-          />
-          <Button
-            variant="filled"
-            color="secondary"
-            onClick={handleAvatarUpload}
           >
-            Upload Avatar
-          </Button>
-        </Box>
+            <Box sx={{ position: "relative", zIndex: 1 }}>
+              <Typography
+                variant="h3"
+                sx={{ color: "primary.main", fontWeight: "bold", mb: 2 }}
+              >
+                Teams
+              </Typography>
+              <Typography
+                variant="body1"
+                sx={{ color: "text.secondary", mb: 3 }}
+              >
+                Join or create professional esports teams and compete at the
+                highest level
+              </Typography>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => navigate("/teams")}
+                sx={{
+                  backgroundColor: "primary.main",
+                  "&:hover": { backgroundColor: "primary.main" },
+                  px: 4,
+                  py: 1.5,
+                }}
+              >
+                Browse Teams
+              </Button>
+            </Box>
+          </Box>
 
-        {/* Update Email or Password */}
-        <form onSubmit={handleUpdate}>
-          <Typography variant="h6">Update Email or Password</Typography>
-          <TextField
-            label="New Email"
-            type="email"
-            value={newEmail}
-            onChange={(event) => setNewEmail(event.target.value)}
-            fullWidth
-            variant="filled"
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            label="New Password"
-            type="password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            fullWidth
-            variant="filled"
-            sx={{ mb: 2 }}
-          />
-          <Button type="submit" variant="contained" color="primary">
-            Update
-          </Button>
-        </form>
-
-        {/* Create New Team */}
-        <Box sx={{ mt: 3 }}>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleCreateTeam}
+          {/* Scrims Section */}
+          <Box
+            sx={{
+              position: "relative",
+              overflow: "hidden",
+              py: 6,
+              textAlign: "center",
+              backgroundColor: "rgba(255, 0, 255, 0.1)", // secondary.main 10% opacity
+              borderRadius: 2,
+              mb: 4,
+              border: "1px solid",
+              borderColor: "secondary.main",
+              "&::before": {
+                content: '""',
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                backgroundImage: 'url("/images/scrims-bg.jpg")',
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                opacity: 0.2,
+                zIndex: 0,
+              },
+            }}
           >
-            + Create New Team
-          </Button>
-        </Box>
+            <Box sx={{ position: "relative", zIndex: 1 }}>
+              <Typography
+                variant="h3"
+                sx={{ color: "secondary.main", fontWeight: "bold", mb: 2 }}
+              >
+                Scrims
+              </Typography>
+              <Typography
+                variant="body1"
+                sx={{ color: "text.secondary", mb: 3 }}
+              >
+                Practice with competitive scrimmage matches and improve your
+                skills
+              </Typography>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => navigate("/scrims")}
+                sx={{
+                  backgroundColor: "secondary.main",
+                  "&:hover": { backgroundColor: "secondary.main" },
+                  px: 4,
+                  py: 1.5,
+                }}
+              >
+                Find Scrims
+              </Button>
+            </Box>
+          </Box>
 
-        {/* Join Team Button */}
-        <Box sx={{ mt: 2 }}>
-          <Button variant="filled" color="secondary" onClick={handleJoinTeam}>
-            Join a Team
-          </Button>
+          {/* Tournaments Section */}
+          <Box
+            sx={{
+              position: "relative",
+              overflow: "hidden",
+              py: 6,
+              textAlign: "center",
+              backgroundColor: "rgba(255, 180, 0, 0.1)", // warning.main 10% opacity
+              borderRadius: 2,
+              border: "1px solid",
+              borderColor: "warning.main",
+              "&::before": {
+                content: '""',
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                backgroundImage: 'url("/images/tournaments-bg.jpg")',
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                opacity: 0.2,
+                zIndex: 0,
+              },
+            }}
+          >
+            <Box sx={{ position: "relative", zIndex: 1 }}>
+              <Typography
+                variant="h3"
+                sx={{ color: "warning.main", fontWeight: "bold", mb: 2 }}
+              >
+                Tournaments
+              </Typography>
+              <Typography
+                variant="body1"
+                sx={{ color: "text.secondary", mb: 3 }}
+              >
+                Compete in tournaments with prize pools and climb the rankings
+              </Typography>
+              <Button
+                variant="contained"
+                size="large"
+                onClick={() => navigate("/tournaments")}
+                sx={{
+                  backgroundColor: "warning.main",
+                  "&:hover": { backgroundColor: "warning.main" },
+                  color: "text.primary",
+                  px: 4,
+                  py: 1.5,
+                }}
+              >
+                Enter Tournament
+              </Button>
+            </Box>
+          </Box>
         </Box>
-
-        {/* Team List */}
-        <Box sx={{ mt: 3 }}>
-          <Typography variant="h6">Your Teams</Typography>
-          {teams.length === 0 ? (
-            <Typography>No teams joined yet.</Typography>
-          ) : (
-            <Grid container spacing={2}>
-              {teams.map((team) => (
-                <Grid size={{ xs: 6, md: 8 }}>
-                  <Paper
-                    sx={{ padding: 2, cursor: "pointer" }}
-                    onClick={() => handleViewTeam(team._id)}
-                  >
-                    <Typography variant="body1">
-                      <strong>{team.name}</strong> — {team.game}
-                    </Typography>
-                  </Paper>
-                </Grid>
-              ))}
-            </Grid>
-          )}
-        </Box>
-      </Paper>
-      <JoinTeamModal isOpen={isModalOpen} closeModal={closeModal} />
-    </Container>
+      </Container>
+    </Box>
   );
 };
 

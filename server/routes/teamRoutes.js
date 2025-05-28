@@ -6,18 +6,19 @@ const { protect } = require("../middleware/authMiddleware");
 
 // Create a team
 router.post("/create", protect, async (req, res) => {
-  const { name, game, rank } = req.body;
+  const { name, game, rank, server } = req.body; // include server
   const userId = req.user.id;
 
   try {
-    const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase(); // Random 6-char team code
+    const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const team = await Team.create({
       name,
       game,
       rank,
+      server, // pass server here
       owner: userId,
       members: [{ user: userId, role: "owner" }],
-      teamCode, // Store team code
+      teamCode,
     });
 
     res.status(201).json(team);
@@ -25,7 +26,6 @@ router.post("/create", protect, async (req, res) => {
     if (err.code === 11000 && err.keyPattern?.name) {
       return res.status(400).json({ message: "Team name already exists" });
     }
-
     console.error("Team creation error:", err);
     res
       .status(500)
@@ -37,10 +37,10 @@ router.post("/create", protect, async (req, res) => {
 router.get("/my", protect, async (req, res) => {
   const userId = req.user.id;
   try {
-    const teams = await Team.find({
-      "members.user": userId,
-    }).populate("members.user", "username email");
-
+    const teams = await Team.find({ "members.user": userId }).populate(
+      "members.user",
+      "username email"
+    );
     res.status(200).json(teams);
   } catch (err) {
     console.error("Error fetching teams:", err);
@@ -51,14 +51,12 @@ router.get("/my", protect, async (req, res) => {
 // Get team details by teamId
 router.get("/:id", protect, async (req, res) => {
   const teamId = req.params.id;
-
   try {
     const team = await Team.findById(teamId).populate(
       "members.user",
       "username email"
     );
     if (!team) return res.status(404).json({ message: "Team not found" });
-
     res.status(200).json(team);
   } catch (err) {
     console.error("Error fetching team:", err);
@@ -75,18 +73,16 @@ router.post("/join", protect, async (req, res) => {
     const team = await Team.findOne({ teamCode });
     if (!team) return res.status(404).json({ message: "Invalid team code" });
 
-    // Check if user is already a member
     if (team.members.some((member) => member.user.toString() === userId)) {
       return res
         .status(400)
         .json({ message: "You are already a member of this team" });
     }
 
-    // Add user to team
     team.members.push({ user: userId, role: "player" });
     await team.save();
 
-    // Optionally, add team to user document (if needed)
+    // Also add the team to the user's document
     const user = await User.findById(userId);
     user.teams.push(team._id);
     await user.save();

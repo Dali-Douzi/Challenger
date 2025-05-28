@@ -7,7 +7,7 @@ import TeamDashboard from "./pages/TeamDashboard";
 import CreateTeam from "./pages/CreateTeam";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Navbar from "./components/Navbar";
-import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
 import { ThemeProvider } from "@mui/material/styles";
 import theme from "./styles/theme";
 import React from "react";
@@ -81,11 +81,11 @@ function App() {
               }
             />
             <Route
-              path="/settings"
+              path="/profile"
               element={
                 <ProtectedRoute>
                   <Navbar />
-                  <Settings />
+                  <Profile />
                 </ProtectedRoute>
               }
             />

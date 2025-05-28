@@ -1,3 +1,4 @@
+// dbSeeder.js
 const Game = require("../models/Game");
 
 const seedGames = async () => {
@@ -9,6 +10,7 @@ const seedGames = async () => {
     await Game.insertMany([
       {
         name: "League of Legends",
+        servers: ["EUW", "EUNE", "NA", "LAN", "LAS", "OCE", "KR", "JP", "BR"],
         ranks: [
           "Iron",
           "Bronze",
@@ -32,6 +34,14 @@ const seedGames = async () => {
       },
       {
         name: "Rocket League",
+        servers: [
+          "NA-East",
+          "NA-West",
+          "EU",
+          "OCE",
+          "South America",
+          "Middle East",
+        ],
         ranks: [
           "Bronze",
           "Silver",
@@ -46,6 +56,7 @@ const seedGames = async () => {
       },
       {
         name: "Valorant",
+        servers: ["NA", "EU", "APAC", "KR", "BR", "LATAM"],
         ranks: [
           "Iron",
           "Bronze",
@@ -61,6 +72,7 @@ const seedGames = async () => {
       },
       {
         name: "Counter-Strike",
+        servers: ["NA", "EU", "Asia", "Oceania", "South America"],
         ranks: [
           "Silver",
           "Gold",

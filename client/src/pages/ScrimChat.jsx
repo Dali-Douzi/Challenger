@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect, useRef } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import io from "socket.io-client";
 import { AuthContext } from "../context/AuthContext";
@@ -14,7 +14,6 @@ import {
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
-const API_BASE = "http://localhost:4444";
 let socket;
 
 // Up to two initials from a name
@@ -26,12 +25,10 @@ const getInitials = (str) =>
     .slice(0, 2)
     .join("");
 
-export default function ScrimChat(props) {
+export default function ScrimChat() {
   const { user } = useContext(AuthContext);
-  const { chatId: paramChatId } = useParams();
-  const { state } = useLocation();
+  const { scrimId } = useParams();
   const navigate = useNavigate();
-  const chatId = props.chatId || state?.chatId || paramChatId;
   const token = localStorage.getItem("token") || "";
 
   const [scrim, setScrim] = useState(null);
@@ -41,41 +38,45 @@ export default function ScrimChat(props) {
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  // Our user’s ID
-  const myId = user?.id ?? user?._id;
+  // Our user’s ID for message alignment
+  const myId = user?.id || user?._id;
 
-  // Redirect if no chat
+  // Redirect back if no scrimId in URL
   useEffect(() => {
-    if (!chatId) navigate("/chats");
-  }, [chatId, navigate]);
+    if (!scrimId) navigate("/chats");
+  }, [scrimId, navigate]);
 
-  // Socket.io
+  // Socket.io: join the one-to-one chat room by scrimId
   useEffect(() => {
-    if (!chatId) return;
-    socket = io(API_BASE, { auth: { token } });
-    socket.emit("joinRoom", chatId);
-    socket.on("newMessage", (msg) => setMessages((prev) => [...prev, msg]));
-    return () => socket.disconnect();
-  }, [chatId, token]);
+    if (!scrimId) return;
+    socket = io("/", { auth: { token } });
+    socket.emit("joinRoom", scrimId);
+    socket.on("newMessage", (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, [scrimId, token]);
 
-  // Fetch scrim + messages
+  // Load scrim metadata and chat messages
   useEffect(() => {
-    if (!chatId) return;
+    if (!scrimId) return;
     let mounted = true;
     (async () => {
       setLoading(true);
       try {
-        const [sRes, mRes] = await Promise.all([
-          axios.get(`/api/scrims/${chatId}`, {
+        const [scrimRes, chatRes] = await Promise.all([
+          axios.get(`/api/scrims/${scrimId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get(`/api/scrims/chat/${chatId}`, {
+          axios.get(`/api/scrims/chat/${scrimId}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
         if (!mounted) return;
-        setScrim(sRes.data);
-        setMessages(mRes.data.messages || []);
+        setScrim(scrimRes.data);
+        setMessages(chatRes.data.messages || []);
       } catch (err) {
         if (mounted) setError(err.response?.data?.message || err.message);
       } finally {
@@ -85,16 +86,16 @@ export default function ScrimChat(props) {
     return () => {
       mounted = false;
     };
-  }, [chatId, token]);
+  }, [scrimId, token]);
 
-  // Auto-scroll
+  // Auto-scroll as messages arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const handleSend = () => {
-    if (!text.trim() || !chatId) return;
-    socket.emit("sendMessage", { scrimId: chatId, text });
+    if (!text.trim() || !scrimId) return;
+    socket.emit("sendMessage", { scrimId, text });
     setText("");
   };
 
@@ -113,13 +114,13 @@ export default function ScrimChat(props) {
     );
   }
 
-  // Cluster messages by sender + minute
+  // Cluster messages by sender + same minute
   const clusters = [];
   messages.forEach((msg) => {
     const senderObj =
       typeof msg.sender === "object" ? msg.sender : { _id: msg.sender };
     const senderId = senderObj._id;
-    const minuteKey = new Date(msg.timestamp).toISOString().substr(0, 16);
+    const minuteKey = new Date(msg.timestamp).toISOString().slice(0, 16);
     const last = clusters[clusters.length - 1];
     if (last && last.senderId === senderId && last.minuteKey === minuteKey) {
       last.msgs.push(msg);
@@ -218,7 +219,6 @@ export default function ScrimChat(props) {
                       alignItems: "flex-end",
                     }}
                   >
-                    {/* text */}
                     <Typography
                       sx={{
                         flex: 1,
@@ -228,13 +228,9 @@ export default function ScrimChat(props) {
                     >
                       {msg.text}
                     </Typography>
-                    {/* time */}
                     <Typography
                       variant="caption"
-                      sx={{
-                        flexShrink: 0,
-                        color: "black",
-                      }}
+                      sx={{ flexShrink: 0, color: "black" }}
                     >
                       {time}
                     </Typography>

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 
 const authRoutes = require("./routes/authRoutes");
@@ -39,6 +40,13 @@ app.use((req, res, next) => {
   );
   next();
 });
+
+// —————— NEW: Serve uploaded avatars statically ——————
+// Makes files under /uploads/avatars accessible at http://<host>/uploads/avatars/...
+app.use(
+  "/uploads/avatars",
+  express.static(path.join(__dirname, "uploads/avatars"))
+);
 
 // Mount API routes
 app.use("/api/auth", authRoutes);
