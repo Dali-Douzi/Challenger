@@ -52,7 +52,7 @@ export default function ChatsPage() {
 
   // Default-select the first chat if none chosen
   useEffect(() => {
-    if (!scrimId && chats.length > 0) {
+    if (!scrimId && chats.length > 0 && chats[0].scrim) {
       navigate(`/chats/${chats[0].scrim._id}`, { replace: true });
     }
   }, [scrimId, chats, navigate]);
@@ -104,33 +104,38 @@ export default function ChatsPage() {
             <Typography color="error" sx={{ p: 2 }}>
               {error}
             </Typography>
-          ) : chats.length === 0 ? (
+          ) : chats.filter((chat) => chat.scrim).length === 0 ? (
             <Typography sx={{ p: 2 }}>No chats yet</Typography>
           ) : (
             <List disablePadding>
-              {chats.map((chat) => {
-                // Determine the opposing team
-                const opponent =
-                  chat.owner._id === currentTeamId
-                    ? chat.challenger
-                    : chat.owner;
-                const time = new Date(
-                  chat.scrim.scheduledTime
-                ).toLocaleString();
-                const id = chat.scrim._id; // URL param is the scrim ID
-                return (
-                  <ListItemButton
-                    key={chat._id}
-                    selected={id === scrimId}
-                    onClick={() => navigate(`/chats/${id}`)}
-                  >
-                    <ListItemText
-                      primary={opponent.name}
-                      secondary={`${chat.scrim.format} • ${time}`}
-                    />
-                  </ListItemButton>
-                );
-              })}
+              {chats
+                .filter((chat) => chat.scrim) // only those with a scrim
+                .map((chat) => {
+                  const { scrim, owner, challenger, _id: chatId } = chat;
+                  const opponent =
+                    owner._id === currentTeamId ? challenger : owner;
+
+                  // safe date formatting
+                  const time = scrim.scheduledTime
+                    ? new Date(scrim.scheduledTime).toLocaleString()
+                    : "";
+
+                  const id = scrim._id; // URL param is the scrim ID
+                  return (
+                    <ListItemButton
+                      key={chatId}
+                      selected={id === scrimId}
+                      onClick={() => navigate(`/chats/${id}`)}
+                    >
+                      <ListItemText
+                        primary={opponent.name}
+                        secondary={
+                          `${scrim.format || ""}` + (time ? ` • ${time}` : "")
+                        }
+                      />
+                    </ListItemButton>
+                  );
+                })}
             </List>
           )}
         </Drawer>

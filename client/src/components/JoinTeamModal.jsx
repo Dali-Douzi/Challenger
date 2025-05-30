@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   TextField,
   Button,
@@ -8,9 +8,8 @@ import {
   Modal,
   Paper,
 } from "@mui/material";
-import React from "react";
 
-const JoinTeamModal = ({ isOpen, closeModal }) => {
+const JoinTeamModal = ({ isOpen, closeModal, onSuccess }) => {
   const [teamCode, setTeamCode] = useState("");
   const [error, setError] = useState("");
 
@@ -30,7 +29,8 @@ const JoinTeamModal = ({ isOpen, closeModal }) => {
 
       if (res.ok) {
         alert("Joined team successfully!");
-        closeModal(); // Close the modal on success
+        closeModal();
+        onSuccess(); // <-- trigger dashboard refresh
       } else {
         const data = await res.json();
         setError(data.message || "Failed to join team");
@@ -52,7 +52,7 @@ const JoinTeamModal = ({ isOpen, closeModal }) => {
           <TextField
             label="Team Code"
             value={teamCode}
-            onChange={(event) => setTeamCode(event.target.value)}
+            onChange={(e) => setTeamCode(e.target.value)}
             fullWidth
             required
             variant="filled"

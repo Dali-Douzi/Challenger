@@ -9,10 +9,11 @@ const { Server } = require("socket.io");
 const authRoutes = require("./routes/authRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const gameRoutes = require("./routes/gameRoutes");
-const seedGames = require("./config/dbSeeder");
 const scrimRoutes = require("./routes/scrimRoutes");
 const scrimChatRoutes = require("./routes/scrimChatRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const tournamentRoutes = require("./routes/tournamentRoutes");
+const matchRoutes = require("./routes/matchRoutes");
 
 dotenv.config();
 
@@ -26,7 +27,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
@@ -41,8 +42,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// —————— NEW: Serve uploaded avatars statically ——————
-// Makes files under /uploads/avatars accessible at http://<host>/uploads/avatars/...
+// Serve uploaded avatars
 app.use(
   "/uploads/avatars",
   express.static(path.join(__dirname, "uploads/avatars"))
@@ -52,9 +52,11 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/games", gameRoutes);
-app.use("/api/scrims/chat", scrimChatRoutes);
 app.use("/api/scrims", scrimRoutes);
+app.use("/api/scrims/chat", scrimChatRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/tournaments", tournamentRoutes);
+app.use("/api/matches", matchRoutes);
 
 // Connect to MongoDB
 const connectDB = async () => {
@@ -64,7 +66,8 @@ const connectDB = async () => {
       socketTimeoutMS: 30000,
     });
     console.log("✅ MongoDB Connected");
-    // Seed initial game data
+    // Seed initial data if needed
+    const seedGames = require("./config/dbSeeder");
     await seedGames();
   } catch (error) {
     console.error("❌ MongoDB Connection Error:", error);
@@ -73,7 +76,7 @@ const connectDB = async () => {
 };
 connectDB();
 
-// Create HTTP and Socket.IO servers
+// Create HTTP + Socket.IO servers
 const PORT = process.env.PORT || 4444;
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -84,8 +87,13 @@ const io = new Server(server, {
   },
 });
 
-// Delegate all Socket.IO logic to socketHandler.js
+// Delegate all Socket.IO logic
 require("./socketHandler")(io);
 
+// Kick off any notification cron jobs
+require("./utils/notificationScheduler");
+
 // Start listening
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});

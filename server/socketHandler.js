@@ -1,9 +1,11 @@
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const ScrimChat = require("./models/ScrimChat");
 const Scrim = require("./models/Scrim");
 const Team = require("./models/Team");
 const Notification = require("./models/Notification");
 const User = require("./models/User");
+const Tournament = require("./models/Tournament");
 
 module.exports = (io) => {
   // Authenticate socket connections via JWT
@@ -22,35 +24,46 @@ module.exports = (io) => {
     }
   });
 
-  io.on("connection", (socket) => {
+  io.on("connection", async (socket) => {
     console.log(`🟢 Socket connected: ${socket.id} (user ${socket.userId})`);
 
-    /**
-     * Join a chat room by its Chat ID (not the scrim ID).
-     * Ensures the user’s team is either owner or challenger.
-     */
+    // Join team rooms for real-time notifications
+    try {
+      const teams = await Team.find({
+        $or: [{ owner: socket.userId }, { "members.user": socket.userId }],
+      }).select("_id");
+      teams.forEach((t) => {
+        socket.join(`team_${t._id}`);
+      });
+
+      // ALSO join the user's personal room for user-scoped emits
+      socket.join(`user_${socket.userId}`);
+    } catch (err) {
+      console.error("Error joining team rooms:", err);
+    }
+
+    // Subscribe to tournament updates explicitly
+    socket.on("subscribeTournament", (tournamentId) => {
+      socket.join(`tournament_${tournamentId}`);
+    });
+
+    // === Scrim Chat Handlers ===
     socket.on("joinRoom", async (scrimId) => {
       try {
-        // Load the scrim and find the chat thread for this user
         const scrim = await Scrim.findById(scrimId);
         if (!scrim) return socket.emit("error", "Scrim not found");
 
-        // Build list of this user’s team IDs
         const teams = await Team.find({
           $or: [{ owner: socket.userId }, { "members.user": socket.userId }],
         }).select("_id");
         const teamIds = teams.map((t) => t._id.toString());
 
-        // Fetch the one-to-one chat thread
         const chat = await ScrimChat.findOne({
           scrim,
           $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
         });
-        if (!chat) {
-          return socket.emit("error", "Chat thread not created");
-        }
+        if (!chat) return socket.emit("error", "Chat thread not created");
 
-        // Join the room named after the Chat’s _id
         socket.join(chat._id.toString());
       } catch (err) {
         console.error("joinRoom error:", err);
@@ -58,79 +71,189 @@ module.exports = (io) => {
       }
     });
 
-    /**
-     * Handle sending a new message.
-     * Broadcasts to the Chat ID room, and notifies the other team.
-     */
     socket.on("sendMessage", async ({ scrimId, text }) => {
       if (!scrimId || !text) {
         return socket.emit("error", "Scrim ID and text are required");
       }
       try {
-        // Find this user’s team IDs
         const teams = await Team.find({
           $or: [{ owner: socket.userId }, { "members.user": socket.userId }],
         }).select("_id");
         const teamIds = teams.map((t) => t._id.toString());
 
-        // Fetch the chat for this scrim scoped to the user
         const chat = await ScrimChat.findOne({
           scrim: mongoose.Types.ObjectId(scrimId),
           $or: [{ owner: { $in: teamIds } }, { challenger: { $in: teamIds } }],
         });
-        if (!chat) {
-          return socket.emit("error", "Chat thread not found");
-        }
+        if (!chat) return socket.emit("error", "Chat thread not found");
 
         const room = chat._id.toString();
-        // Ensure the client has joined the correct chat room
         if (!io.sockets.adapter.rooms.has(room)) {
           return socket.emit("error", "You must join the room first");
         }
 
-        // Persist the message
-        const msg = {
-          sender: socket.userId,
-          text,
-          timestamp: new Date(),
-        };
+        // Save message
+        const msg = { sender: socket.userId, text, timestamp: new Date() };
         chat.messages.push(msg);
         await chat.save();
 
-        // Populate sender details for broadcast
         const senderUser = await User.findById(socket.userId).select(
           "username avatar"
         );
 
-        // Determine the recipient team(s): chat.owner and chat.challenger
-        const recipientTeamIds = [
+        // Notify the other team(s)
+        const recipientTeams = [
           chat.owner.toString(),
           chat.challenger.toString(),
-        ].filter((tid) => tid !== teamIds.find((id) => id === tid));
+        ].filter((tid) => !teamIds.includes(tid));
+        for (const teamId of recipientTeams) {
+          const notif = await Notification.create({
+            team: teamId,
+            scrim: scrimId,
+            chat: chat._id,
+            message: text,
+            type: "message",
+            url: "/chats",
+          });
+          io.to(`team_${teamId}`).emit("newNotification", notif);
+        }
 
-        // Create notifications for the other party
-        await Promise.all(
-          recipientTeamIds.map((teamId) =>
-            Notification.create({
-              team: teamId,
-              scrim: scrimId,
-              chat: chat._id,
-              message: text,
-              type: "message",
-              url: "/chats",
-            })
-          )
-        );
-
-        // Broadcast to the chat room
-        io.to(room).emit("newMessage", {
-          ...msg,
-          sender: senderUser,
-        });
+        // Broadcast new message
+        io.to(room).emit("newMessage", { ...msg, sender: senderUser });
       } catch (err) {
         console.error("sendMessage error:", err);
         socket.emit("error", "Server error sending message");
       }
     });
+
+    // === Tournament Handlers ===
+
+    socket.on(
+      "createTournament",
+      async ({ name, description, maxParticipants, phases }) => {
+        try {
+          const refereeCode = Math.random()
+            .toString(36)
+            .substring(2, 8)
+            .toUpperCase();
+          const tournament = await Tournament.create({
+            name,
+            description,
+            maxParticipants,
+            phases,
+            organizer: socket.userId,
+            refereeCode,
+            status: "REGISTRATION_OPEN",
+          });
+          // Notify organizer
+          const notif = await Notification.create({
+            team: null,
+            tournament: tournament._id,
+            message: `Tournament "${tournament.name}" created.`,
+            url: `/tournaments/${tournament._id}`,
+          });
+          io.to(`user_${socket.userId}`).emit("newNotification", notif);
+          io.emit("tournament:created", tournament);
+        } catch (err) {
+          console.error("createTournament error:", err);
+          socket.emit("error", "Server error creating tournament");
+        }
+      }
+    );
+
+    socket.on("joinTournament", async ({ tournamentId, teamId }) => {
+      try {
+        const tournament = await Tournament.findById(tournamentId);
+        if (!tournament) return socket.emit("error", "Tournament not found");
+        if (
+          tournament.pendingTeams.includes(teamId) ||
+          tournament.teams.includes(teamId)
+        ) {
+          return socket.emit("error", "Already requested or joined");
+        }
+        tournament.pendingTeams.push(teamId);
+        await tournament.save();
+
+        // Notify organizer and broadcast join event
+        const notif = await Notification.create({
+          team: teamId,
+          tournament: tournamentId,
+          message: `Team requested to join "${tournament.name}".`,
+          url: `/tournaments/${tournamentId}`,
+        });
+        io.to(`tournament_${tournamentId}`).emit("tournament:joined", {
+          tournamentId,
+          pendingCount: tournament.pendingTeams.length,
+        });
+        io.to(`team_${teamId}`).emit("newNotification", notif);
+      } catch (err) {
+        console.error("joinTournament error:", err);
+        socket.emit("error", "Server error joining tournament");
+      }
+    });
+
+    socket.on("startTournament", async ({ tournamentId }) => {
+      try {
+        const tournament = await Tournament.findById(tournamentId);
+        if (!tournament) return socket.emit("error", "Tournament not found");
+        if (tournament.organizer.toString() !== socket.userId) {
+          return socket.emit("error", "Not authorized to start tournament");
+        }
+        tournament.status = "IN_PROGRESS";
+        await tournament.save();
+
+        // Notify all teams
+        for (const teamId of tournament.teams) {
+          const notif = await Notification.create({
+            team: teamId,
+            tournament: tournamentId,
+            message: `Tournament "${tournament.name}" has started.`,
+            url: `/tournaments/${tournamentId}`,
+          });
+          io.to(`team_${teamId}`).emit("newNotification", notif);
+        }
+
+        io.to(`tournament_${tournamentId}`).emit(
+          "tournament:started",
+          tournament
+        );
+      } catch (err) {
+        console.error("startTournament error:", err);
+        socket.emit("error", "Server error starting tournament");
+      }
+    });
+
+    socket.on(
+      "updateTournament",
+      async ({ tournamentId, phaseIndex, matches }) => {
+        try {
+          const tournament = await Tournament.findById(tournamentId);
+          if (!tournament) return socket.emit("error", "Tournament not found");
+
+          // Save bracket changes (you might integrate existing route logic here)
+          tournament.status = "IN_PROGRESS";
+          await tournament.save();
+
+          // Notify all teams of update
+          for (const teamId of tournament.teams) {
+            const notif = await Notification.create({
+              team: teamId,
+              tournament: tournamentId,
+              message: `Bracket updated for "${tournament.name}".`,
+              url: `/tournaments/${tournamentId}`,
+            });
+            io.to(`team_${teamId}`).emit("newNotification", notif);
+          }
+
+          io.to(`tournament_${tournamentId}`).emit(
+            "tournament:updated",
+            tournament
+          );
+        } catch (err) {
+          console.error("updateTournament error:", err);
+          socket.emit("error", "Server error updating tournament");
+        }
+      }
+    );
   });
 };

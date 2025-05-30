@@ -6,7 +6,6 @@ const TeamSchema = new mongoose.Schema(
     name: { type: String, required: true, unique: true },
     game: { type: String, required: true },
     rank: { type: String, required: true },
-    server: { type: String, required: true },
     teamCode: { type: String, unique: true, default: uuidv4 }, // Unique team code
     server: { type: String, required: true },
     owner: {
@@ -22,6 +21,7 @@ const TeamSchema = new mongoose.Schema(
           enum: ["player", "manager", "substitute", "owner"],
           default: "player",
         },
+        rank: String,
       },
     ],
   },

@@ -2,206 +2,171 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Typography, Button, Container } from "@mui/material";
 
+// image imports
+import teamsBg from "../images/teams-bg.jpg";
+import scrimsBg from "../images/scrims-bg.jpg";
+import tournamentsBg from "../images/tournaments-bg.jpg";
+
+// footer import
+import Footer from "../components/Footer";
+
 const Dashboard = () => {
   const navigate = useNavigate();
+
+  const sections = [
+    {
+      title: "Teams",
+      description:
+        "Join or create professional esports teams and compete at the highest level",
+      link: "/teams",
+      palette: "primary",
+      image: teamsBg,
+    },
+    {
+      title: "Scrims",
+      description:
+        "Practice with competitive scrimmage matches and improve your skills",
+      link: "/scrims",
+      palette: "secondary",
+      image: scrimsBg,
+    },
+    {
+      title: "Tournaments",
+      description:
+        "Compete in tournaments with prize pools and climb the rankings",
+      link: "/tournaments",
+      palette: "warning",
+      image: tournamentsBg,
+    },
+  ];
 
   return (
     <Box
       sx={{
         minHeight: "100vh",
-        backgroundColor: "background.default",
-        color: "text.primary",
+        backgroundColor: (theme) => theme.palette.background.default,
+        color: (theme) => theme.palette.text.primary,
       }}
     >
-      {/* Hero Section */}
       <Container maxWidth="lg">
+        {/* Hero Section */}
         <Box sx={{ py: 10, textAlign: "center" }}>
           <Typography variant="h2" sx={{ fontWeight: "bold", mb: 3 }}>
             Welcome to{" "}
-            <Box component="span" sx={{ color: "primary.main" }}>
+            <Box
+              component="span"
+              sx={{ color: (theme) => theme.palette.primary.main }}
+            >
               Challenger{" "}
             </Box>
             <br />
             The Ultimate Esports Platform
           </Typography>
-          <Typography variant="h6" sx={{ color: "text.secondary", mb: 4 }}>
+          <Typography
+            variant="h6"
+            sx={{ color: (theme) => theme.palette.text.secondary, mb: 4 }}
+          >
             Join teams, practice in scrims, and compete in tournaments
           </Typography>
         </Box>
 
-        {/* Main 3 Sections */}
-        <Box sx={{ pb: 8 }}>
-          {/* Teams Section */}
-          <Box
-            sx={{
-              position: "relative",
-              overflow: "hidden",
-              py: 6,
-              textAlign: "center",
-              backgroundColor: "rgba(0, 255, 255, 0.1)", // primary.main 10% opacity
-              borderRadius: 2,
-              mb: 4,
-              border: "1px solid",
-              borderColor: "primary.main",
-              "&::before": {
-                content: '""',
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: 'url("/images/teams-bg.jpg")',
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: 0.2,
-                zIndex: 0,
-              },
-            }}
-          >
-            <Box sx={{ position: "relative", zIndex: 1 }}>
-              <Typography
-                variant="h3"
-                sx={{ color: "primary.main", fontWeight: "bold", mb: 2 }}
-              >
-                Teams
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{ color: "text.secondary", mb: 3 }}
-              >
-                Join or create professional esports teams and compete at the
-                highest level
-              </Typography>
-              <Button
-                variant="contained"
-                size="large"
-                onClick={() => navigate("/teams")}
+        {/* Stacked Section Cards */}
+        <Box
+          sx={{
+            pb: 8,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: { xs: 6, md: 8 },
+          }}
+        >
+          {sections.map(({ title, description, link, palette, image }) => (
+            <Box
+              key={title}
+              sx={{
+                position: "relative",
+                overflow: "hidden",
+                width: { xs: "100%", sm: "90%", md: "85%" },
+                height: "60vh",
+                backgroundColor: "rgba(0,0,0,0.05)",
+                borderRadius: 2,
+                border: "1px solid",
+                borderColor: (theme) => theme.palette[palette].main,
+              }}
+            >
+              {/* Background image */}
+              <Box
+                component="img"
+                src={image}
+                alt={`${title} background`}
                 sx={{
-                  backgroundColor: "primary.main",
-                  "&:hover": { backgroundColor: "primary.main" },
-                  px: 4,
-                  py: 1.5,
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  opacity: 0.2,
+                  zIndex: 0,
                 }}
-              >
-                Browse Teams
-              </Button>
-            </Box>
-          </Box>
+              />
 
-          {/* Scrims Section */}
-          <Box
-            sx={{
-              position: "relative",
-              overflow: "hidden",
-              py: 6,
-              textAlign: "center",
-              backgroundColor: "rgba(255, 0, 255, 0.1)", // secondary.main 10% opacity
-              borderRadius: 2,
-              mb: 4,
-              border: "1px solid",
-              borderColor: "secondary.main",
-              "&::before": {
-                content: '""',
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: 'url("/images/scrims-bg.jpg")',
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: 0.2,
-                zIndex: 0,
-              },
-            }}
-          >
-            <Box sx={{ position: "relative", zIndex: 1 }}>
-              <Typography
-                variant="h3"
-                sx={{ color: "secondary.main", fontWeight: "bold", mb: 2 }}
-              >
-                Scrims
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{ color: "text.secondary", mb: 3 }}
-              >
-                Practice with competitive scrimmage matches and improve your
-                skills
-              </Typography>
-              <Button
-                variant="contained"
-                size="large"
-                onClick={() => navigate("/scrims")}
+              {/* Content overlay */}
+              <Box
                 sx={{
-                  backgroundColor: "secondary.main",
-                  "&:hover": { backgroundColor: "secondary.main" },
-                  px: 4,
-                  py: 1.5,
+                  position: "relative",
+                  zIndex: 1,
+                  p: 4,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  textAlign: "center",
                 }}
               >
-                Find Scrims
-              </Button>
+                <Typography
+                  variant="h3"
+                  sx={{
+                    color: (theme) => theme.palette[palette].main,
+                    fontWeight: "bold",
+                    mb: 2,
+                  }}
+                >
+                  {title}
+                </Typography>
+                <Typography
+                  variant="body1"
+                  sx={{
+                    color: (theme) => theme.palette.text.secondary,
+                    mb: 3,
+                  }}
+                >
+                  {description}
+                </Typography>
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={() => navigate(link)}
+                  sx={{
+                    backgroundColor: (theme) => theme.palette[palette].main,
+                    "&:hover": {
+                      backgroundColor: (theme) => theme.palette[palette].dark,
+                    },
+                    alignSelf: "center",
+                    px: 4,
+                    py: 1.5,
+                  }}
+                >
+                  Go to {title}
+                </Button>
+              </Box>
             </Box>
-          </Box>
-
-          {/* Tournaments Section */}
-          <Box
-            sx={{
-              position: "relative",
-              overflow: "hidden",
-              py: 6,
-              textAlign: "center",
-              backgroundColor: "rgba(255, 180, 0, 0.1)", // warning.main 10% opacity
-              borderRadius: 2,
-              border: "1px solid",
-              borderColor: "warning.main",
-              "&::before": {
-                content: '""',
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: "100%",
-                backgroundImage: 'url("/images/tournaments-bg.jpg")',
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: 0.2,
-                zIndex: 0,
-              },
-            }}
-          >
-            <Box sx={{ position: "relative", zIndex: 1 }}>
-              <Typography
-                variant="h3"
-                sx={{ color: "warning.main", fontWeight: "bold", mb: 2 }}
-              >
-                Tournaments
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{ color: "text.secondary", mb: 3 }}
-              >
-                Compete in tournaments with prize pools and climb the rankings
-              </Typography>
-              <Button
-                variant="contained"
-                size="large"
-                onClick={() => navigate("/tournaments")}
-                sx={{
-                  backgroundColor: "warning.main",
-                  "&:hover": { backgroundColor: "warning.main" },
-                  color: "text.primary",
-                  px: 4,
-                  py: 1.5,
-                }}
-              >
-                Enter Tournament
-              </Button>
-            </Box>
-          </Box>
+          ))}
         </Box>
       </Container>
+
+      {/* Footer */}
+      <Footer />
     </Box>
   );
 };

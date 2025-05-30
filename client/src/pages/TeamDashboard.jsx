@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import JoinTeamModal from "../components/JoinTeamModal";
 import {
@@ -22,26 +22,32 @@ const TeamDashboard = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("http://localhost:4444/api/teams/my", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.message || "Failed to fetch teams");
-        }
-        const data = await res.json();
-        setTeams(data);
-      } catch (err) {
-        console.error("Error fetching teams:", err);
-        setError("Error fetching your teams");
-      } finally {
-        setLoading(false);
+  // Extracted fetch function so we can call it on mount and after joining
+  const fetchTeams = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("http://localhost:4444/api/teams/my", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to fetch teams");
       }
-    })();
+      const data = await res.json();
+      setTeams(data);
+    } catch (err) {
+      console.error("Error fetching teams:", err);
+      setError("Error fetching your teams");
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
+
+  // Initial load
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
 
   const handleCreateTeam = () => {
     navigate("/create-team");
@@ -53,6 +59,11 @@ const TeamDashboard = () => {
 
   const closeModal = () => {
     setIsModalOpen(false);
+  };
+
+  // Called by JoinTeamModal on successful join
+  const onJoinSuccess = () => {
+    fetchTeams();
   };
 
   if (loading) {
@@ -70,7 +81,6 @@ const TeamDashboard = () => {
           Your Teams
         </Typography>
 
-        {/* Action buttons */}
         <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
           <Button
             variant="contained"
@@ -111,7 +121,11 @@ const TeamDashboard = () => {
           </Paper>
         )}
 
-        <JoinTeamModal isOpen={isModalOpen} closeModal={closeModal} />
+        <JoinTeamModal
+          isOpen={isModalOpen}
+          closeModal={closeModal}
+          onSuccess={onJoinSuccess}
+        />
       </Box>
     </Container>
   );

@@ -1,40 +1,46 @@
+import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "@mui/material/styles";
+import { Box } from "@mui/material";
+import theme from "./styles/theme";
+
+import ProtectedRoute from "./components/ProtectedRoute";
+import Navbar from "./components/Navbar";
+
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import ScrimDashboard from "./pages/ScrimDashboard";
-import TeamDashboard from "./pages/TeamDashboard";
-import CreateTeam from "./pages/CreateTeam";
-import ProtectedRoute from "./components/ProtectedRoute";
-import Navbar from "./components/Navbar";
-import Profile from "./pages/Profile";
-import { ThemeProvider } from "@mui/material/styles";
-import theme from "./styles/theme";
-import React from "react";
-import { Box } from "@mui/material";
-import TeamProfile from "./pages/TeamProfile";
 import EditScrim from "./pages/EditScrim";
 import ScrimRequests from "./pages/ScrimRequests";
+import TeamDashboard from "./pages/TeamDashboard";
+import TeamProfile from "./pages/TeamProfile";
+import CreateTeam from "./pages/CreateTeam";
+import Profile from "./pages/Profile";
 import ChatsPage from "./pages/ChatsPage";
+
+import TournamentDashboard from "./pages/TournamentDashboard";
+import CreateTournamentPage from "./pages/CreateTournamentPage";
+import TournamentPage from "./pages/TournamentPage";
 
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <Box
         sx={{
-          minHeight: "100vh", // Ensures the background fills the viewport
+          minHeight: "100vh",
           backgroundColor: theme.palette.background.default,
-          display: "flex", // Flexbox layout
+          display: "flex",
           flexDirection: "column",
         }}
       >
         <Router>
           <Routes>
-            {/* Public Routes */}
+            {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
 
-            {/* Protected Routes */}
+            {/* Protected routes */}
             <Route
               path="/dashboard"
               element={
@@ -44,6 +50,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+
             <Route
               path="/scrims"
               element={
@@ -54,6 +61,25 @@ function App() {
               }
             />
             <Route
+              path="/scrims/edit"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <EditScrim />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/scrims/:scrimId/requests"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <ScrimRequests />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
               path="/teams"
               element={
                 <ProtectedRoute>
@@ -63,11 +89,11 @@ function App() {
               }
             />
             <Route
-              path="/team-dashboard/:id"
+              path="/teams/:id"
               element={
                 <ProtectedRoute>
                   <Navbar />
-                  <TeamDashboard />
+                  <TeamProfile />
                 </ProtectedRoute>
               }
             />
@@ -80,6 +106,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+
             <Route
               path="/profile"
               element={
@@ -89,21 +116,62 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/teams" element={<TeamDashboard />} />
-            <Route path="/teams/:id" element={<TeamProfile />} />
-            <Route path="/scrims/edit" element={<EditScrim />} />
+
             <Route
-              path="/scrims/:scrimId/requests"
-              element={<ScrimRequests />}
+              path="/chats"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <ChatsPage />
+                </ProtectedRoute>
+              }
             />
-            <Route path="/chats" element={<ChatsPage />} />
-            <Route path="/chats/:chatId" element={<ChatsPage />} />
+            <Route
+              path="/chats/:chatId"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <ChatsPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Tournament routes */}
+            <Route
+              path="/tournaments"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <TournamentDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/tournaments/create"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <CreateTournamentPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/tournaments/:id"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <TournamentPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 404 fallback */}
             <Route
               path="*"
               element={
-                <div style={{ padding: "2rem", textAlign: "center" }}>
+                <Box sx={{ p: 4, textAlign: "center", color: "white" }}>
                   <h1>404 - Page not found</h1>
-                </div>
+                </Box>
               }
             />
           </Routes>
