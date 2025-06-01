@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React from "react"
+import { useState, useMemo } from "react"
 import {
   Box,
   Typography,
@@ -18,186 +19,284 @@ import {
   Select,
   MenuItem,
   CircularProgress,
-} from "@mui/material";
-import { Check, Close } from "@mui/icons-material";
-import { Link } from "react-router-dom";
-import axios from "axios";
-import ActionModal from "./ActionModal";
-import useMyTeams from "../hooks/useMyTeams";
+  Paper,
+  Tooltip,
+} from "@mui/material"
+import { Check, Close, GroupAdd, HowToReg, InfoOutlined } from "@mui/icons-material"
+import { Link } from "react-router-dom"
+import axios from "axios"
+import ActionModal from "./ActionModal"
+import useMyTeams from "../hooks/useMyTeams"
 
 const ParticipantsSection = ({ tournament, onUpdate }) => {
-  const [refModalOpen, setRefModalOpen] = useState(false);
-  const [signupOpen, setSignupOpen] = useState(false);
-  const [selectedTeam, setSelectedTeam] = useState("");
-  const [error, setError] = useState("");
-  const [signupError, setSignupError] = useState("");
+  const [refModalOpen, setRefModalOpen] = useState(false)
+  const [signupOpen, setSignupOpen] = useState(false)
+  const [selectedTeamToJoin, setSelectedTeamToJoin] = useState("")
+  const [error, setError] = useState("")
+  const [signupError, setSignupError] = useState("")
 
-  const isOrganizer = tournament.isOrganizer;
-  const isRegistrationOpen = tournament.status === "REGISTRATION_OPEN";
+  const isOrganizer = tournament.isOrganizer
+  const isReferee = tournament.isReferee
+  const isRegistrationOpen = tournament.status === "REGISTRATION_OPEN"
 
-  // Fetch user's teams
-  const {
-    teams: myTeams,
-    loading: teamsLoading,
-    error: teamsError,
-  } = useMyTeams();
+  const { teams: myTeams, loading: myTeamsLoading, error: myTeamsError } = useMyTeams()
+
+  const { teamsInTournamentIds, eligibleTeamsToJoin } = useMemo(() => {
+    if (!myTeams || !tournament.pendingTeams || !tournament.teams) {
+      return { teamsInTournamentIds: new Set(), eligibleTeamsToJoin: [] }
+    }
+    const pendingTeamIds = tournament.pendingTeams.map((t) => t._id)
+    const approvedTeamIds = tournament.teams.map((t) => t._id)
+    const teamsInTournamentIdsSet = new Set([...pendingTeamIds, ...approvedTeamIds])
+
+    const eligible = myTeams.filter((myTeam) => !teamsInTournamentIdsSet.has(myTeam._id))
+    return { teamsInTournamentIds: teamsInTournamentIdsSet, eligibleTeamsToJoin: eligible }
+  }, [myTeams, tournament.pendingTeams, tournament.teams])
+
+  const userInvolvedTeamsWithStatus = useMemo(() => {
+    if (!myTeams) return []
+    return myTeams
+      .map((myTeam) => {
+        if (tournament.teams.find((t) => t._id === myTeam._id)) {
+          return { ...myTeam, tournamentStatus: "APPROVED" }
+        }
+        if (tournament.pendingTeams.find((t) => t._id === myTeam._id)) {
+          return { ...myTeam, tournamentStatus: "PENDING" }
+        }
+        return null
+      })
+      .filter(Boolean)
+  }, [myTeams, tournament.teams, tournament.pendingTeams])
 
   const handleApprove = async (teamId) => {
+    setError("")
     try {
-      await axios.put(`/tournaments/${tournament._id}/teams/${teamId}/approve`);
-      onUpdate();
+      await axios.put(`/api/tournaments/${tournament._id}/teams/${teamId}/approve`)
+      onUpdate()
     } catch (err) {
-      setError(err.response?.data?.message || "Error approving team");
+      setError(err.response?.data?.message || "Error approving team")
     }
-  };
+  }
 
-  const handleRemoveTeam = async (teamId) => {
+  const handleRemoveTeam = async (teamId, isPending = false) => {
+    setError("")
     try {
-      await axios.delete(`/tournaments/${tournament._id}/teams/${teamId}`);
-      onUpdate();
+      await axios.delete(`/api/tournaments/${tournament._id}/teams/${teamId}`)
+      onUpdate()
     } catch (err) {
-      setError(err.response?.data?.message || "Error removing team");
+      setError(err.response?.data?.message || `Error ${isPending ? "rejecting" : "removing"} team`)
     }
-  };
+  }
 
   const handleAddReferee = async (code) => {
+    setError("")
     try {
-      await axios.post(`/tournaments/${tournament._id}/referees`, { code });
-      onUpdate();
+      await axios.post(`/api/tournaments/${tournament._id}/referees`, { code })
+      onUpdate()
     } catch (err) {
-      setError(err.response?.data?.message || "Error adding referee");
+      setError(err.response?.data?.message || "Error adding referee")
     }
-  };
+  }
 
   const handleRemoveReferee = async (userId) => {
+    setError("")
     try {
-      await axios.delete(`/tournaments/${tournament._id}/referees/${userId}`);
-      onUpdate();
+      await axios.delete(`/api/tournaments/${tournament._id}/referees/${userId}`)
+      onUpdate()
     } catch (err) {
-      setError(err.response?.data?.message || "Error removing referee");
+      setError(err.response?.data?.message || "Error removing referee")
     }
-  };
+  }
 
   const handleSignup = async () => {
+    if (!selectedTeamToJoin) return
+    setSignupError("")
     try {
-      setSignupError("");
-      await axios.post(`/tournaments/${tournament._id}/teams`, {
-        teamId: selectedTeam,
-      });
-      onUpdate();
-      setSignupOpen(false);
+      await axios.post(`/api/tournaments/${tournament._id}/teams`, {
+        teamId: selectedTeamToJoin,
+      })
+      onUpdate()
+      setSignupOpen(false)
+      setSelectedTeamToJoin("")
     } catch (err) {
-      setSignupError(err.response?.data?.message || "Error joining tournament");
+      setSignupError(err.response?.data?.message || "Error joining tournament")
     }
-  };
+  }
 
   return (
     <Box>
       {error && (
         <Box mb={2}>
-          <Alert severity="error">{error}</Alert>
+          <Alert severity="error" onClose={() => setError("")}>
+            {error}
+          </Alert>
         </Box>
       )}
 
-      <Typography variant="h6">Teams</Typography>
-
       {isOrganizer && tournament.pendingTeams?.length > 0 && (
-        <Box mt={1} mb={2}>
-          <Typography variant="subtitle2">Pending Requests</Typography>
-          <List>
+        <Paper elevation={2} sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom sx={{ display: "flex", alignItems: "center" }}>
+            <GroupAdd sx={{ mr: 1 }} /> Pending Team Requests ({tournament.pendingTeams.length})
+          </Typography>
+          <List dense>
             {tournament.pendingTeams.map((team) => (
               <ListItem
                 key={team._id}
                 secondaryAction={
                   <>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleApprove(team._id)}
-                    >
-                      <Check />
-                    </IconButton>
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleRemoveTeam(team._id)}
-                    >
-                      <Close />
-                    </IconButton>
+                    <Tooltip title="Approve Team">
+                      <IconButton
+                        edge="end"
+                        color="success"
+                        onClick={() => handleApprove(team._id)}
+                        aria-label="approve team"
+                      >
+                        <Check />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Reject Team">
+                      <IconButton
+                        edge="end"
+                        color="error"
+                        onClick={() => handleRemoveTeam(team._id, true)}
+                        aria-label="reject team"
+                      >
+                        <Close />
+                      </IconButton>
+                    </Tooltip>
                   </>
                 }
+                sx={{ "&:hover": { bgcolor: "action.hover" }, borderRadius: 1, mb: 0.5 }}
               >
                 <ListItemText
-                  primary={<Link to={`/teams/${team._id}`}>{team.name}</Link>}
+                  primary={
+                    <Link to={`/teams/${team._id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                      {team.name}
+                    </Link>
+                  }
                 />
               </ListItem>
             ))}
           </List>
-        </Box>
+        </Paper>
       )}
 
-      <List>
-        {tournament.teams.map((team) => (
-          <ListItem
-            key={team._id}
-            secondaryAction={
-              isOrganizer && (
-                <IconButton
-                  edge="end"
-                  onClick={() => handleRemoveTeam(team._id)}
-                >
-                  <Close />
-                </IconButton>
-              )
-            }
-          >
-            <ListItemText
-              primary={<Link to={`/teams/${team._id}`}>{team.name}</Link>}
-            />
-          </ListItem>
-        ))}
-      </List>
+      <Paper elevation={2} sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6" gutterBottom sx={{ display: "flex", alignItems: "center" }}>
+          <HowToReg sx={{ mr: 1 }} /> Participating Teams ({tournament.teams?.length || 0})
+        </Typography>
+        {tournament.teams?.length > 0 ? (
+          <List dense>
+            {tournament.teams.map((team) => (
+              <ListItem
+                key={team._id}
+                secondaryAction={
+                  isOrganizer && (
+                    <Tooltip title="Remove Team">
+                      <IconButton
+                        edge="end"
+                        color="error"
+                        onClick={() => handleRemoveTeam(team._id)}
+                        aria-label="remove team"
+                      >
+                        <Close />
+                      </IconButton>
+                    </Tooltip>
+                  )
+                }
+                sx={{ "&:hover": { bgcolor: "action.hover" }, borderRadius: 1, mb: 0.5 }}
+              >
+                <ListItemText
+                  primary={
+                    <Link to={`/teams/${team._id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                      {team.name}
+                    </Link>
+                  }
+                />
+              </ListItem>
+            ))}
+          </List>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            No teams are currently participating.
+            {isRegistrationOpen && " Teams can join if registration is open."}
+          </Typography>
+        )}
+      </Paper>
 
-      {!isOrganizer && isRegistrationOpen && (
-        <Box mt={2}>
-          <Button variant="outlined" onClick={() => setSignupOpen(true)}>
-            Join Tournament
+      {!isOrganizer && isRegistrationOpen && eligibleTeamsToJoin.length > 0 && (
+        <Box mt={2} mb={3}>
+          <Button variant="contained" color="primary" onClick={() => setSignupOpen(true)} startIcon={<GroupAdd />}>
+            Join Tournament with another Team
           </Button>
+        </Box>
+      )}
+      {!isOrganizer && userInvolvedTeamsWithStatus.length > 0 && (
+        <Box mb={2}>
+          <Typography variant="subtitle1" gutterBottom>
+            Your Team Statuses:
+          </Typography>
+          {userInvolvedTeamsWithStatus.map((team) => (
+            <Alert
+              key={team._id}
+              severity={team.tournamentStatus === "APPROVED" ? "success" : "info"}
+              icon={
+                team.tournamentStatus === "APPROVED" ? (
+                  <Check fontSize="inherit" />
+                ) : (
+                  <InfoOutlined fontSize="inherit" />
+                )
+              }
+              sx={{ mb: 1 }}
+            >
+              Team "{team.name}" is {team.tournamentStatus === "APPROVED" ? "participating" : "pending approval"}.
+            </Alert>
+          ))}
         </Box>
       )}
 
       <Divider sx={{ my: 3 }} />
 
-      <Typography variant="h6">Referees</Typography>
-      <List>
-        <ListItem>
-          <ListItemText
-            primary={tournament.organizer.username}
-            secondary="Organizer"
-          />
-        </ListItem>
-        {tournament.referees.map((ref) => (
-          <ListItem
-            key={ref._id}
-            secondaryAction={
-              isOrganizer &&
-              ref._id !== tournament.organizer._id && (
-                <IconButton
-                  edge="end"
-                  onClick={() => handleRemoveReferee(ref._id)}
-                >
-                  <Close />
-                </IconButton>
-              )
-            }
-          >
-            <ListItemText primary={ref.username} />
+      <Paper elevation={2} sx={{ p: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Referees
+        </Typography>
+        <List dense>
+          <ListItem sx={{ "&:hover": { bgcolor: "action.hover" }, borderRadius: 1, mb: 0.5 }}>
+            <ListItemText primary={tournament.organizer.username} secondary="Organizer" />
           </ListItem>
-        ))}
-      </List>
+          {tournament.referees.map((ref) => {
+            if (ref._id === tournament.organizer._id) return null
+            return (
+              <ListItem
+                key={ref._id}
+                secondaryAction={
+                  isOrganizer && (
+                    <Tooltip title="Remove Referee">
+                      <IconButton
+                        edge="end"
+                        color="error"
+                        onClick={() => handleRemoveReferee(ref._id)}
+                        aria-label="remove referee"
+                      >
+                        <Close />
+                      </IconButton>
+                    </Tooltip>
+                  )
+                }
+                sx={{ "&:hover": { bgcolor: "action.hover" }, borderRadius: 1, mb: 0.5 }}
+              >
+                <ListItemText primary={ref.username} />
+              </ListItem>
+            )
+          })}
+        </List>
+      </Paper>
 
-      {isOrganizer && (
+      {!isOrganizer && !isReferee && (
         <Box mt={2}>
           <Button variant="outlined" onClick={() => setRefModalOpen(true)}>
-            Add Referee
+            Enter Referee Code
           </Button>
         </Box>
       )}
@@ -209,28 +308,35 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
         placeholder="ABC123"
         onClose={() => setRefModalOpen(false)}
         onConfirm={(code) => {
-          setRefModalOpen(false);
-          handleAddReferee(code);
+          setRefModalOpen(false)
+          handleAddReferee(code)
         }}
       />
 
-      <Dialog open={signupOpen} onClose={() => setSignupOpen(false)}>
-        <DialogTitle>Select a Team to Join</DialogTitle>
+      <Dialog open={signupOpen} onClose={() => setSignupOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Select Team to Join Tournament</DialogTitle>
         <DialogContent>
-          {teamsLoading ? (
-            <CircularProgress />
-          ) : teamsError ? (
-            <Alert severity="error">{teamsError}</Alert>
+          {myTeamsLoading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", my: 2 }}>
+              <CircularProgress />
+            </Box>
+          ) : myTeamsError ? (
+            <Alert severity="error">{myTeamsError}</Alert>
+          ) : eligibleTeamsToJoin.length === 0 ? (
+            <Alert severity="info">
+              All your teams are already in this tournament, or you have no teams eligible to join.
+              {myTeams.length === 0 && <Link to="/create-team"> Create a team</Link>}
+            </Alert>
           ) : (
-            <FormControl fullWidth>
-              <InputLabel id="select-team-label">Team</InputLabel>
+            <FormControl fullWidth margin="normal">
+              <InputLabel id="select-team-to-join-label">Team</InputLabel>
               <Select
-                labelId="select-team-label"
-                value={selectedTeam}
+                labelId="select-team-to-join-label"
+                value={selectedTeamToJoin}
                 label="Team"
-                onChange={(e) => setSelectedTeam(e.target.value)}
+                onChange={(e) => setSelectedTeamToJoin(e.target.value)}
               >
-                {myTeams.map((team) => (
+                {eligibleTeamsToJoin.map((team) => (
                   <MenuItem key={team._id} value={team._id}>
                     {team.name}
                   </MenuItem>
@@ -240,19 +346,33 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
           )}
           {signupError && (
             <Box mt={2}>
-              <Alert severity="error">{signupError}</Alert>
+              <Alert severity="error" onClose={() => setSignupError("")}>
+                {signupError}
+              </Alert>
             </Box>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSignupOpen(false)}>Cancel</Button>
-          <Button onClick={handleSignup} disabled={!selectedTeam}>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => {
+              setSignupOpen(false)
+              setSignupError("")
+              setSelectedTeamToJoin("")
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSignup}
+            disabled={!selectedTeamToJoin || myTeamsLoading || eligibleTeamsToJoin.length === 0}
+            variant="contained"
+          >
             Join
           </Button>
         </DialogActions>
       </Dialog>
     </Box>
-  );
-};
+  )
+}
 
-export default ParticipantsSection;
+export default ParticipantsSection

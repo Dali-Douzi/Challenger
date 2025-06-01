@@ -9,23 +9,25 @@ const CreateTournamentPage = () => {
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [refCode, setRefCode] = useState("");
+  const [tourneyId, setTourneyId] = useState("");
+  const [showCode, setShowCode] = useState(false);
 
-  // Handle new tournament creation
   const handleCreate = async (formData) => {
     try {
-      const { data } = await axios.post("/tournaments", formData);
-      navigate(`/tournaments/${data._id}`);
+      const { data } = await axios.post("/api/tournaments", formData);
+      setRefCode(data.refereeCode);
+      setTourneyId(data._id);
+      setShowCode(true);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Error creating tournament");
     }
   };
 
-  // Handle referee-code join (stub; requires backend support to find by code)
   const handleRefereeJoin = async (code) => {
     try {
-      // Example: lookup tournament by code then join
-      const res = await axios.get(`/tournaments/code/${code}`);
-      await axios.post(`/tournaments/${res.data._id}/referees`, { code });
+      const res = await axios.get(`/api/tournaments/code/${code}`);
+      await axios.post(`/api/tournaments/${res.data._id}/referees`, { code });
       navigate(`/tournaments/${res.data._id}`);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Invalid referee code");
@@ -33,7 +35,7 @@ const CreateTournamentPage = () => {
   };
 
   return (
-    <Container sx={{ py: 4 }}>
+    <Container sx={{ py: 4, color: "white" }}>
       <Typography variant="h4" gutterBottom>
         Create Tournament
       </Typography>
@@ -44,27 +46,42 @@ const CreateTournamentPage = () => {
         </Box>
       )}
 
-      {/* Tournament creation form */}
-      <TournamentForm onSubmit={handleCreate} />
+      {!showCode ? (
+        <>
+          <TournamentForm onSubmit={handleCreate} />
 
-      {/* Referee join button & modal */}
-      <Box mt={4}>
-        <Button variant="outlined" onClick={() => setModalOpen(true)}>
-          Enter Referee Code
-        </Button>
-      </Box>
+          <Box mt={4}>
+            <Button variant="outlined" onClick={() => setModalOpen(true)}>
+              Enter Referee Code
+            </Button>
+          </Box>
 
-      <ActionModal
-        open={modalOpen}
-        title="Enter Referee Code"
-        label="Referee Code"
-        placeholder="ABC123"
-        onClose={() => setModalOpen(false)}
-        onConfirm={async (value) => {
-          setModalOpen(false);
-          await handleRefereeJoin(value);
-        }}
-      />
+          <ActionModal
+            open={modalOpen}
+            title="Enter Referee Code"
+            label="Referee Code"
+            placeholder="ABC123"
+            onClose={() => setModalOpen(false)}
+            onConfirm={async (value) => {
+              setModalOpen(false);
+              await handleRefereeJoin(value);
+            }}
+          />
+        </>
+      ) : (
+        <Box sx={{ textAlign: "center", mt: 4 }}>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            🎉 Tournament created! Your referee code is:{" "}
+            <strong>{refCode}</strong>
+          </Alert>
+          <Button
+            variant="contained"
+            onClick={() => navigate(`/tournaments/${tourneyId}`)}
+          >
+            Go to Tournament
+          </Button>
+        </Box>
+      )}
     </Container>
   );
 };

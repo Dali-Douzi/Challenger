@@ -6,16 +6,20 @@ const ControlsSection = ({ tournament, onAction }) => {
   const [error, setError] = useState("");
   const { _id: id, status, phases, isOrganizer, isReferee } = tournament;
 
-  const handleAction = async (url, method = "put", data) => {
+  // Generalized action helper: prefixes "/api/tournaments"
+  const handleAction = async (url, method = "put", data = null) => {
     try {
       setError("");
-      await axios[method](`/tournaments/${id}${url}`, data);
+      await axios[method](`/api/tournaments/${id}${url}`, data);
       onAction();
     } catch (err) {
       setError(err.response?.data?.message || "Error performing action");
     }
   };
 
+  // Only organizers can lock registrations or lock the bracket
+  // Referees and organizers can start the tournament once bracket is locked
+  // Organizers can complete the tournament at the end
   return (
     <Box>
       {error && (
@@ -24,94 +28,117 @@ const ControlsSection = ({ tournament, onAction }) => {
         </Box>
       )}
 
-      <Typography variant="h6" gutterBottom>
-        Controls
-      </Typography>
+      {/* ORGANIZER CONTROLS */}
+      {isOrganizer && (
+        <Box mb={2} sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+          {/* 1) Lock Registrations */}
+          {status === "REGISTRATION_OPEN" && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => handleAction("/lock-registrations", "put")}
+            >
+              Lock Registrations
+            </Button>
+          )}
 
-      <Stack direction="row" spacing={2} flexWrap="wrap">
-        {/* Lock registrations */}
-        {isOrganizer && status === "REGISTRATION_OPEN" && (
-          <Button
-            variant="contained"
-            onClick={() => handleAction("/lock-registrations")}
-          >
-            Lock Registrations
-          </Button>
-        )}
+          {/* 2) Lock Bracket */}
+          {status === "REGISTRATION_LOCKED" && (
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={() => handleAction("/lock-bracket", "put")}
+            >
+              Lock Bracket
+            </Button>
+          )}
 
-        {/* Lock bracket */}
-        {isOrganizer && status === "REGISTRATION_LOCKED" && (
-          <Button
-            variant="contained"
-            onClick={() => handleAction("/lock-bracket")}
-          >
-            Lock Bracket
-          </Button>
-        )}
+          {/* 3) Start Tournament */}
+          {/* Allow organizer to start once the bracket is locked */}
+          {status === "BRACKET_LOCKED" && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={() => handleAction("/start", "put")}
+            >
+              Start Tournament
+            </Button>
+          )}
 
-        {/* Start tournament */}
-        {(isOrganizer || isReferee) && status === "BRACKET_LOCKED" && (
-          <Button variant="contained" onClick={() => handleAction("/start")}>
-            Start Tournament
-          </Button>
-        )}
+          {/* 4) Complete Tournament */}
+          {status === "IN_PROGRESS" && (
+            <Button
+              variant="contained"
+              color="warning"
+              onClick={() => handleAction("/complete", "put")}
+            >
+              Complete Tournament
+            </Button>
+          )}
+        </Box>
+      )}
 
-        {/* Complete tournament */}
-        {isOrganizer && status === "IN_PROGRESS" && (
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => handleAction("/complete")}
-          >
-            Complete Tournament
-          </Button>
-        )}
-      </Stack>
+      {/* REFEREE CONTROLS */}
+      {isReferee && !isOrganizer && (
+        <Box mb={2}>
+          {/* Once bracket is locked, referees can also start the tournament */}
+          {status === "BRACKET_LOCKED" && (
+            <Button
+              variant="contained"
+              color="success"
+              onClick={() => handleAction("/start", "put")}
+            >
+              Start Tournament
+            </Button>
+          )}
+        </Box>
+      )}
 
-      {/* Phase controls */}
-      {isOrganizer && status !== "REGISTRATION_OPEN" && (
-        <Box mt={4}>
-          <Typography variant="subtitle1" gutterBottom>
-            Phases
+      {/* INDIVIDUAL PHASE CONTROLS */}
+      {phases && phases.length > 0 && (
+        <Box mt={3}>
+          <Typography variant="h6" gutterBottom>
+            Phase Controls
           </Typography>
-          <Stack direction="column" spacing={1}>
+          <Stack spacing={2}>
             {phases.map((phase, idx) => (
               <Box
                 key={idx}
                 sx={{ display: "flex", alignItems: "center", gap: 2 }}
               >
-                <Typography>
-                  Phase {idx + 1} ({phase.bracketType.replace("_", " ")}):{" "}
-                  {phase.status.replace("_", " ")}
+                <Typography sx={{ flexGrow: 1 }}>
+                  Phase {idx + 1}: {phase.bracketType} (
+                  {phase.status.replace(/_/g, " ")})
                 </Typography>
 
-                {/* Start phase */}
-                {phase.status === "PENDING" && (
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      handleAction(`/phases/${idx}`, "put", {
-                        status: "IN_PROGRESS",
-                      })
-                    }
-                  >
-                    Start Phase
-                  </Button>
-                )}
-
-                {/* Complete phase */}
-                {phase.status === "IN_PROGRESS" && (
-                  <Button
-                    size="small"
-                    color="secondary"
-                    onClick={() =>
-                      handleAction(`/phases/${idx}`, "put", {
-                        status: "COMPLETE",
-                      })
-                    }
-                  >
-                    Complete Phase
-                  </Button>
+                {/* Only organizer can change phase statuses */}
+                {isOrganizer && (
+                  <>
+                    {phase.status === "PENDING" && (
+                      <Button
+                        variant="outlined"
+                        onClick={() =>
+                          handleAction(`/phases/${idx}`, "put", {
+                            status: "IN_PROGRESS",
+                          })
+                        }
+                      >
+                        Start Phase
+                      </Button>
+                    )}
+                    {phase.status === "IN_PROGRESS" && (
+                      <Button
+                        variant="outlined"
+                        onClick={() =>
+                          handleAction(`/phases/${idx}`, "put", {
+                            status: "COMPLETE",
+                          })
+                        }
+                      >
+                        Complete Phase
+                      </Button>
+                    )}
+                  </>
                 )}
               </Box>
             ))}

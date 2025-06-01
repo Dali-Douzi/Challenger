@@ -9,7 +9,7 @@ const {
 
 // --- Get one match ---
 // GET /matches/:id
-router.get("/:id", protect, isRefereeOrOrganizer, async (req, res) => {
+router.get("/api/matches/:id", protect, isRefereeOrOrganizer, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id)
       .populate("teamA", "name")

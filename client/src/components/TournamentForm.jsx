@@ -1,6 +1,4 @@
-// @ts-check
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Box,
   TextField,
@@ -8,141 +6,206 @@ import {
   MenuItem,
   IconButton,
   Typography,
+  CircularProgress,
 } from "@mui/material";
 import { Add, Delete } from "@mui/icons-material";
+import axios from "axios";
 
 /**
- * @typedef {{ bracketType: 'SINGLE_ELIM'|'DOUBLE_ELIM'|'ROUND_ROBIN' }} Phase
+ * @typedef {Object} Phase
+ * @property {'SINGLE_ELIM'|'DOUBLE_ELIM'|'ROUND_ROBIN'} bracketType
+ * @property {'PENDING'|'IN_PROGRESS'|'COMPLETE'} status
+ */
+/**
  * @typedef {Object} TournamentInput
  * @property {string} name
  * @property {string} description
+ * @property {string} startDate    // format 'YYYY-MM-DD'
+ * @property {string} game         // name of the selected game
  * @property {number} maxParticipants
  * @property {Phase[]} phases
- * @typedef {Object} InitialData
- * @property {string} [name]
- * @property {string} [description]
- * @property {number} [maxParticipants]
- * @property {Phase[]} [phases]
- * @property {string} [_id]
  */
-
-const bracketTypes = [
-  { value: "SINGLE_ELIM", label: "Single Elimination" },
-  { value: "DOUBLE_ELIM", label: "Double Elimination" },
-  { value: "ROUND_ROBIN", label: "Round Robin" },
-];
-
 /**
- * @param {{ initialData?: InitialData, onSubmit: (data: TournamentInput) => void }} props
+ * @param {{ initialData?: Partial<TournamentInput & { _id?: string }>; onSubmit: (data: TournamentInput) => void }} props
  */
 const TournamentForm = ({ initialData = {}, onSubmit }) => {
   const [name, setName] = useState(initialData.name || "");
   const [description, setDescription] = useState(initialData.description || "");
+  const [startDate, setStartDate] = useState(
+    initialData.startDate ? initialData.startDate.substring(0, 10) : ""
+  );
+  const [game, setGame] = useState(initialData.game || "");
   const [maxParticipants, setMaxParticipants] = useState(
     initialData.maxParticipants ?? ""
   );
+  /** @type {[Phase[], React.Dispatch<React.SetStateAction<Phase[]>>]} */
+  const [phases, setPhases] = useState(
+    initialData.phases?.map((p) => ({
+      bracketType: p.bracketType,
+      status: p.status,
+    })) || [{ bracketType: "SINGLE_ELIM", status: "PENDING" }]
+  );
 
-  /** @type {Phase[]} */
-  const initialPhases =
-    Array.isArray(initialData.phases) && initialData.phases.length
-      ? initialData.phases.map((p) => ({
-          // cast to union type
-          bracketType: /** @type {Phase['bracketType']} */ (p.bracketType),
-        }))
-      : [{ bracketType: "SINGLE_ELIM" }];
+  // New: games dropdown
+  const [games, setGames] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(true);
+  const [gamesError, setGamesError] = useState("");
 
-  const [phases, setPhases] = useState(initialPhases);
+  useEffect(() => {
+    const fetchGames = async () => {
+      try {
+        const { data } = await axios.get("/api/games");
+        setGames(data);
+      } catch (err) {
+        setGamesError(err.response?.data?.message || err.message);
+      } finally {
+        setLoadingGames(false);
+      }
+    };
+    fetchGames();
+  }, []);
 
-  const addPhase = () => {
-    setPhases([...phases, { bracketType: "SINGLE_ELIM" }]);
+  const handleAddPhase = () => {
+    setPhases([...phases, { bracketType: "SINGLE_ELIM", status: "PENDING" }]);
   };
 
-  const removePhase = (index) => {
-    setPhases(phases.filter((_, idx) => idx !== index));
+  const handleRemovePhase = (index) => {
+    setPhases(phases.filter((_, i) => i !== index));
   };
 
-  const updatePhaseType = (index, value) => {
-    const typed = /** @type {Phase['bracketType']} */ (value);
-    setPhases(
-      phases.map((phase, idx) =>
-        idx === index ? { ...phase, bracketType: typed } : phase
-      )
+  const handlePhaseChange = (index, field, value) => {
+    const updated = phases.map((phase, i) =>
+      i === index ? { ...phase, [field]: value } : phase
     );
+    setPhases(updated);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSubmit({
-      name: name.trim(),
-      description: description.trim(),
+      name,
+      description,
+      startDate,
+      game,
       maxParticipants: Number(maxParticipants),
       phases,
     });
   };
 
   return (
-    <Box component="form" onSubmit={handleSubmit} noValidate sx={{ mt: 2 }}>
-      <TextField
-        label="Name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        fullWidth
-        margin="normal"
-      />
-      <TextField
-        label="Description"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        required
-        fullWidth
-        margin="normal"
-        multiline
-        rows={3}
-      />
-      <TextField
-        label="Max Participants"
-        type="number"
-        value={maxParticipants}
-        onChange={(e) => setMaxParticipants(e.target.value)}
-        required
-        fullWidth
-        margin="normal"
-        inputProps={{ min: 2 }}
-      />
+    <Box component="form" onSubmit={handleSubmit}>
+      {/* Name */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          fullWidth
+          required
+        />
+      </Box>
 
-      <Box sx={{ mt: 4 }}>
-        <Typography variant="h6">Phases</Typography>
-        {phases.map((phase, idx) => (
-          <Box
-            key={idx}
-            sx={{ display: "flex", alignItems: "center", gap: 2, mt: 2 }}
+      {/* Description */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          fullWidth
+          multiline
+          rows={3}
+          required
+        />
+      </Box>
+
+      {/* Start Date */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Start Date"
+          type="date"
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          fullWidth
+          required
+        />
+      </Box>
+
+      {/* Game Dropdown */}
+      <Box sx={{ mb: 2 }}>
+        {loadingGames ? (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : (
+          <TextField
+            select
+            label="Game"
+            value={game}
+            onChange={(e) => setGame(e.target.value)}
+            fullWidth
+            required
+            error={!!gamesError}
+            helperText={gamesError}
           >
+            {games.map((g) => (
+              <MenuItem key={g._id} value={g.name}>
+                {g.name}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
+      </Box>
+
+      {/* Max Participants */}
+      <Box sx={{ mb: 2 }}>
+        <TextField
+          label="Max Participants"
+          type="number"
+          value={maxParticipants}
+          onChange={(e) => setMaxParticipants(e.target.value)}
+          fullWidth
+          required
+          inputProps={{ min: 2 }}
+        />
+      </Box>
+
+      {/* Phases */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="subtitle1" gutterBottom>
+          Phases
+        </Typography>
+        {phases.map((phase, idx) => (
+          <Box key={idx} sx={{ display: "flex", alignItems: "center", mb: 1 }}>
             <TextField
               select
-              label={`Phase ${idx + 1} Type`}
+              label="Bracket Type"
               value={phase.bracketType}
-              onChange={(e) => updatePhaseType(idx, e.target.value)}
-              fullWidth
+              onChange={(e) =>
+                handlePhaseChange(idx, "bracketType", e.target.value)
+              }
+              sx={{ flexGrow: 1 }}
+              required
             >
-              {bracketTypes.map((option) => (
-                <MenuItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuItem>
-              ))}
+              <MenuItem value="SINGLE_ELIM">Single Elimination</MenuItem>
+              <MenuItem value="DOUBLE_ELIM">Double Elimination</MenuItem>
+              <MenuItem value="ROUND_ROBIN">Round Robin</MenuItem>
             </TextField>
-            {phases.length > 1 && (
-              <IconButton onClick={() => removePhase(idx)}>
-                <Delete />
-              </IconButton>
-            )}
+            <IconButton
+              color="error"
+              onClick={() => handleRemovePhase(idx)}
+              sx={{ ml: 1 }}
+            >
+              <Delete />
+            </IconButton>
           </Box>
         ))}
-        <Button startIcon={<Add />} onClick={addPhase} sx={{ mt: 2 }}>
+        <Button variant="outlined" startIcon={<Add />} onClick={handleAddPhase}>
           Add Phase
         </Button>
       </Box>
 
+      {/* Submit */}
       <Box sx={{ mt: 4 }}>
         <Button type="submit" variant="contained" fullWidth>
           {initialData._id ? "Update Tournament" : "Create Tournament"}

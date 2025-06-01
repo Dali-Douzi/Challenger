@@ -1,48 +1,111 @@
-import { useState, useEffect, useCallback } from "react";
-import axios from "axios";
+import { useState, useEffect, useCallback } from "react"
+import axios from "axios"
 
-/**
- * Hook to fetch a single tournament and its matches by phase.
- */
 const useTournament = (id) => {
-  const [tournament, setTournament] = useState(null);
-  const [matchesByPhase, setMatchesByPhase] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [tournament, setTournament] = useState(null)
+  const [matchesByPhase, setMatchesByPhase] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      // 1) Fetch the tournament
-      const { data: tourneyData } = await axios.get(`/api/tournaments/${id}`);
-      setTournament(tourneyData);
-
-      // 2) Fetch matches for each phase
-      const matchPromises = tourneyData.phases.map((_, phaseIndex) =>
-        axios.get("/api/matches", {
-          params: { tournament: id, phase: phaseIndex },
-        })
-      );
-      const responses = await Promise.all(matchPromises);
-      // responses[i].data is the array of matches for phase i
-      setMatchesByPhase(responses.map((res) => res.data));
-    } catch (err) {
-      // show either our API’s message or a generic axios/network error
-      setError(err.response?.data?.message || err.message);
-    } finally {
-      setLoading(false);
+    if (!id) {
+      setLoading(false)
+      setError("No tournament ID provided.")
+      setMatchesByPhase([])
+      setTournament(null)
+      return
     }
-  }, [id]);
+
+    setLoading(true)
+    setError(null)
+    setMatchesByPhase([]) // Reset on new fetch
+
+    try {
+      console.log(`useTournament.js - Fetching tournament data for ID: ${id}`)
+      const { data: tourneyData } = await axios.get(`/api/tournaments/${id}`)
+      console.log("useTournament.js - Fetched tourneyData:", JSON.stringify(tourneyData, null, 2))
+
+      if (!tourneyData || !tourneyData.phases || !Array.isArray(tourneyData.phases)) {
+        console.error("useTournament.js - tourneyData.phases is missing or not an array!")
+        setError("Tournament data is missing phase information.")
+        setTournament(tourneyData) // Still set tournament data if available
+        setLoading(false)
+        return
+      }
+      setTournament(tourneyData)
+
+      if (tourneyData.phases.length === 0) {
+        console.log("useTournament.js - Tournament has no phases. No matches to fetch.")
+        setLoading(false)
+        return
+      }
+
+      const matchPromises = tourneyData.phases.map((phase, phaseIndex) => {
+        const apiUrl = `/api/matches?tournament=${id}&phase=${phaseIndex}`
+        console.log(`useTournament.js - Creating promise for: ${apiUrl}`)
+        return axios.get(apiUrl)
+      })
+
+      console.log(`useTournament.js - Created ${matchPromises.length} match promises.`)
+
+      const responses = await Promise.allSettled(matchPromises)
+      console.log(
+        "useTournament.js - Responses from /api/matches calls (allSettled):",
+        JSON.stringify(responses, null, 2),
+      )
+
+      const newMatchesByPhaseData = responses.map((response, index) => {
+        if (response.status === "fulfilled") {
+          // Ensure response.value.data is an array before mapping
+          if (response.value && Array.isArray(response.value.data)) {
+            console.log(
+              `useTournament.js - Successfully fetched matches for phase index ${index}:`,
+              JSON.stringify(response.value.data, null, 2),
+            )
+            // Transform slot to matchNumber
+            return response.value.data.map((match) => {
+              if (!match || typeof match.slot === "undefined") {
+                console.warn(`useTournament.js - Match object is invalid or missing slot for phase ${index}:`, match)
+                return { ...match, matchNumber: undefined } // Handle problematic match data
+              }
+              return {
+                ...match,
+                matchNumber: match.slot,
+              }
+            })
+          } else {
+            console.warn(
+              `useTournament.js - Fetched data for phase index ${index}, but response.value.data is not an array or missing:`,
+              response.value ? response.value.data : "response.value is undefined",
+            )
+            return [] // Return empty array if data is not in expected array format
+          }
+        } else {
+          console.error(`useTournament.js - Failed to fetch matches for phase index ${index}:`, response.reason)
+          return [] // Return empty array for this phase if fetching failed
+        }
+      })
+
+      setMatchesByPhase(newMatchesByPhaseData)
+      console.log("useTournament.js - Set matchesByPhase to:", JSON.stringify(newMatchesByPhaseData, null, 2))
+    } catch (err) {
+      console.error("useTournament.js - Critical error in fetchData:", err)
+      if (err.response) {
+        console.error("useTournament.js - Error response data:", err.response.data)
+        console.error("useTournament.js - Error response status:", err.response.status)
+      }
+      setError(err.response?.data?.message || err.message || "Failed to fetch tournament data")
+      setTournament(null) // Clear tournament data on critical error
+    } finally {
+      setLoading(false)
+    }
+  }, [id]) // Added id to useCallback dependency array
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchData()
+  }, [fetchData]) // fetchData is now memoized by useCallback
 
-  // allow manual refresh after e.g. a score update
-  const refresh = () => fetchData();
+  return { tournament, matchesByPhase, loading, error, refresh: fetchData } // Added refresh
+}
 
-  return { tournament, matchesByPhase, loading, error, refresh };
-};
-
-export default useTournament;
+export default useTournament

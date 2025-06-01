@@ -187,10 +187,10 @@ export default function Navbar() {
                 Teams
               </Link>
               <Link
-                to="/chats"
+                to="/tournaments"
                 style={{ color: "white", textDecoration: "none" }}
               >
-                Chats
+                Tournaments
               </Link>
             </Box>
 

@@ -22,6 +22,7 @@ import ChatsPage from "./pages/ChatsPage";
 import TournamentDashboard from "./pages/TournamentDashboard";
 import CreateTournamentPage from "./pages/CreateTournamentPage";
 import TournamentPage from "./pages/TournamentPage";
+import MatchPage from "./pages/MatchPage";
 
 function App() {
   return (
@@ -161,6 +162,15 @@ function App() {
                 <ProtectedRoute>
                   <Navbar />
                   <TournamentPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/matches/:id"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <MatchPage />
                 </ProtectedRoute>
               }
             />

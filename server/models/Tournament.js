@@ -15,73 +15,61 @@ const phaseSchema = new Schema(
       default: "PENDING",
     },
   },
-  { _id: false }
+  { timestamps: true }
 );
 
+// Define the tournament schema
 const tournamentSchema = new Schema(
   {
     name: {
       type: String,
       required: true,
-      trim: true,
     },
-
     description: {
       type: String,
       required: true,
-      trim: true,
     },
-
+    startDate: {
+      type: Date,
+      required: true,
+    },
+    game: {
+      type: String,
+      required: true,
+    },
     maxParticipants: {
       type: Number,
       required: true,
-      min: 2,
     },
-
-    phases: {
-      type: [phaseSchema],
-      required: true,
-      validate: {
-        validator: (arr) => arr.length > 0,
-        message: "At least one phase is required",
-      },
-    },
-
+    phases: [phaseSchema],
     organizer: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-
     refereeCode: {
       type: String,
       required: true,
       unique: true,
-      uppercase: true,
-      length: 6,
     },
-
-    referees: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: "User",
-      },
-    ],
-
     pendingTeams: [
       {
         type: Schema.Types.ObjectId,
         ref: "Team",
       },
     ],
-
     teams: [
       {
         type: Schema.Types.ObjectId,
         ref: "Team",
       },
     ],
-
+    referees: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
     status: {
       type: String,
       enum: [

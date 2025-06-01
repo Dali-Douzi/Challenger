@@ -3,7 +3,11 @@ import axios from "axios";
 
 /**
  * Hook to fetch and paginate the list of tournaments.
- * Expects a backend GET /tournaments endpoint returning an array sorted newest-first.
+ * @returns {{
+ *   tournaments: Array,
+ *   loading: boolean,
+ *   error: string
+ * }}
  */
 const useTournaments = () => {
   const [tournaments, setTournaments] = useState([]);

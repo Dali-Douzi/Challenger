@@ -18,7 +18,7 @@ const TournamentDashboard = () => {
 
   if (loading) {
     return (
-      <Container sx={{ mt: 4, textAlign: "center" }}>
+      <Container sx={{ py: 4, textAlign: "center" }}>
         <CircularProgress />
       </Container>
     );
@@ -26,42 +26,48 @@ const TournamentDashboard = () => {
 
   if (error) {
     return (
-      <Container sx={{ mt: 4 }}>
+      <Container sx={{ py: 4 }}>
         <Alert severity="error">{error}</Alert>
       </Container>
     );
   }
 
   return (
-    <Container sx={{ py: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Tournaments
-      </Typography>
-      <Button
-        variant="contained"
-        onClick={() => navigate("/tournaments/create")}
-      >
-        Create Tournament
-      </Button>
+    <Container sx={{ py: 4, color: "white" }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h4">Tournaments</Typography>
+        <Button
+          variant="contained"
+          onClick={() => navigate("/tournaments/create")}
+        >
+          Create Tournament
+        </Button>
+      </Box>
+
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 2,
-          mt: 2,
+          gridTemplateColumns: "1fr",
+          gap: 3,
+          mt: 4,
         }}
       >
         {tournaments.map((t) => (
-          <Card key={t._id}>
+          <Card key={t._id} sx={{ width: "100%", minHeight: 200 }}>
             <CardContent>
-              <Typography variant="h6">{t.name}</Typography>
+              <Typography variant="h5" gutterBottom>
+                {t.name}
+              </Typography>
+              <Typography color="text.secondary">Game: {t.game}</Typography>
               <Typography color="text.secondary">
                 Starts: {new Date(t.startDate).toLocaleDateString()}
               </Typography>
-              <Box sx={{ mt: 1 }}>
+              <Typography color="text.secondary">
+                Status: {t.status.replace(/_/g, " ")}
+              </Typography>
+              <Box sx={{ mt: 2 }}>
                 <Button
                   variant="outlined"
-                  size="small"
                   component={Link}
                   to={`/tournaments/${t._id}`}
                 >

@@ -79,7 +79,7 @@ const MatchPage = () => {
   }
 
   return (
-    <Container sx={{ py: 4 }}>
+    <Container sx={{ py: 4, color:"white" }}>
       <Typography variant="h5" gutterBottom>
         Match #{match.slot} — Phase {match.phaseIndex + 1}
       </Typography>
