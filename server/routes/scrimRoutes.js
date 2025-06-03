@@ -9,30 +9,21 @@ const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// List ALL scrims, with optional ?game, ?server, ?rank filters
+/**
+ * @desc    List all scrims (open and booked)
+ * @route   GET /api/scrims
+ * @access  Private
+ */
 router.get("/", protect, async (req, res) => {
   try {
-    const { game, server, rank } = req.query;
-
-    // 1) Grab every scrim (we’ll filter in JS)
-    const scrims = await Scrim.find({})
-      .populate("teamA", "name game server rank")
+    const scrims = await Scrim.find()
+      .populate("teamA", "name")
       .populate("teamB", "name")
-      .populate("requests", "_id")
-      .sort({ scheduledTime: 1 });
-
-    // 2) Filter based on the actual Team fields you populated
-    const filteredScrims = scrims.filter((s) => {
-      if (game && s.teamA?.game !== game) return false;
-      if (server && s.teamA?.server !== server) return false;
-      if (rank && s.teamA?.rank !== rank) return false;
-      return true;
-    });
-
-    return res.json(filteredScrims);
-  } catch (err) {
-    console.error("🔥 Error listing scrims:", err);
-    return res.status(500).json({ message: "Server error" });
+      .populate("requests", "name");
+    res.json(scrims);
+  } catch (error) {
+    console.error("🔥 List scrims Error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -97,40 +88,6 @@ router.post("/", protect, async (req, res) => {
 });
 
 /**
- * @desc    Get a single scrim’s details (requests visible only to owner/managers)
- * @route   GET /api/scrims/:scrimId
- * @access  Private
- */
-router.get("/:scrimId", protect, async (req, res) => {
-  const { scrimId } = req.params;
-  if (!mongoose.Types.ObjectId.isValid(scrimId)) {
-    return res.status(400).json({ message: "Invalid scrim ID format" });
-  }
-  try {
-    const scrim = await Scrim.findById(scrimId)
-      .populate("teamA", "name owner members game")
-      .populate("teamB", "name")
-      .populate("requests", "name");
-    if (!scrim) return res.status(404).json({ message: "Scrim not found" });
-
-    // Only teamA owner or manager can see the requests array
-    const isOwner = scrim.teamA.owner.toString() === req.user.id;
-    const isManager = scrim.teamA.members.some(
-      (m) => m.user.toString() === req.user.id && m.role === "manager"
-    );
-    const payload = scrim.toObject();
-    if (!isOwner && !isManager) {
-      delete payload.requests;
-    }
-
-    return res.json(payload);
-  } catch (err) {
-    console.error("🔥 Scrim-detail Error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-/**
  * @desc    Team B requests to join an open scrim
  * @route   POST /api/scrims/request/:scrimId
  * @access  Private
@@ -177,17 +134,10 @@ router.post("/request/:scrimId", protect, async (req, res) => {
     await scrim.save();
 
     // 6) Notify the owner
-    let chat = await ScrimChat.findOne({
-      scrim: scrim._id,
-      challenger: teamId,
-    });
+    let chat = await ScrimChat.findOne({ scrim: scrim._id });
     if (!chat) {
-      chat = await ScrimChat.create({
-        scrim,
-        owner: scrim.teamA,
-        challenger: teamId,
-        messages: [],
-      });
+      chat = new ScrimChat({ scrim: scrim._id, messages: [] });
+      await chat.save();
     }
 
     await Notification.create({
@@ -206,6 +156,42 @@ router.post("/request/:scrimId", protect, async (req, res) => {
     return res
       .status(500)
       .json({ message: "Server error", error: error.message });
+  }
+});
+
+/**
+ * @desc    Fetch a single scrim (owner/manager sees pending requests)
+ * @route   GET /api/scrims/:scrimId
+ * @access  Private
+ */
+router.get("/:scrimId", protect, async (req, res) => {
+  const { scrimId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(scrimId)) {
+    return res.status(400).json({ message: "Invalid scrim ID format" });
+  }
+  try {
+    const scrim = await Scrim.findById(scrimId)
+      .populate("teamA", "name owner members game")
+      .populate("teamB", "name")
+      .populate("requests", "name"); // ← populate the pending‐requests array
+    if (!scrim) {
+      return res.status(404).json({ message: "Scrim not found" });
+    }
+
+    // only the teamA owner or a manager can see requests
+    const isOwner = scrim.teamA.owner.toString() === req.user.id;
+    const isManager = scrim.teamA.members.some(
+      (m) => m.user.toString() === req.user.id && m.role === "manager"
+    );
+    const payload = scrim.toObject();
+    if (!isOwner && !isManager) {
+      delete payload.requests; // hide from everyone else
+    }
+
+    res.json(payload);
+  } catch (err) {
+    console.error("🔥 Scrim-fetch Error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 });
 

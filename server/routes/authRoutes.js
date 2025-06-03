@@ -8,13 +8,11 @@ const fs = require("fs");
 const User = require("../models/User");
 const { protect } = require("../middleware/authMiddleware");
 
-// Ensure the 'uploads/avatars' directory exists
 const uploadDir = path.join(__dirname, "../uploads/avatars");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer storage configuration
 const storage = multer.diskStorage({
   destination(req, file, cb) {
     cb(null, uploadDir);
@@ -27,7 +25,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// === Signup Route ===
 router.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
   try {
@@ -53,7 +50,6 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// === Login Route ===
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -82,7 +78,6 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// === Get Profile ===
 router.get("/profile", protect, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -94,14 +89,12 @@ router.get("/profile", protect, async (req, res) => {
   }
 });
 
-// === Update Email/Username/Password ===
 router.put("/update", protect, async (req, res) => {
   try {
     const userId = req.user.id;
     const { username, email, currentPassword, newPassword } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
-    // Password change
     if (newPassword) {
       const isMatch = await bcrypt.compare(currentPassword, user.password);
       if (!isMatch)
@@ -123,13 +116,11 @@ router.put("/update", protect, async (req, res) => {
   }
 });
 
-// === Avatar Upload Route ===
 router.put("/avatar", protect, upload.single("avatar"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
-    // Store relative URL/path
     user.avatar = `/uploads/avatars/${req.file.filename}`;
     await user.save();
     res.status(200).json({ avatar: user.avatar });

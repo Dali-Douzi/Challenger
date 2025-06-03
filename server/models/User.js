@@ -10,7 +10,6 @@ const UserSchema = new mongoose.Schema({
   teams: [{ type: mongoose.Schema.Types.ObjectId, ref: "Team" }],
 });
 
-// Hash password before saving
 UserSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);
@@ -18,7 +17,6 @@ UserSchema.pre("save", async function (next) {
   next();
 });
 
-// Compare passwords for login
 UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

@@ -16,6 +16,55 @@ async function isOrganizer(req, res, next) {
   next()
 }
 
+// — NEW: Validation helpers —
+
+function validateStatusTransition(currentStatus, newStatus) {
+  const validTransitions = {
+    "REGISTRATION_OPEN": ["REGISTRATION_LOCKED"],
+    "REGISTRATION_LOCKED": ["BRACKET_LOCKED", "REGISTRATION_OPEN"], // Allow reopening if needed
+    "BRACKET_LOCKED": ["IN_PROGRESS"],
+    "IN_PROGRESS": ["COMPLETE"],
+    "COMPLETE": [] // No transitions from complete
+  };
+
+  return validTransitions[currentStatus]?.includes(newStatus) || false;
+}
+
+function validateTournamentReadiness(tournament, targetStatus) {
+  const teamCount = tournament.teams?.length || 0;
+  
+  switch (targetStatus) {
+    case "REGISTRATION_LOCKED":
+      if (teamCount < 2) {
+        return { valid: false, message: "Need at least 2 teams to close registration" };
+      }
+      break;
+      
+    case "BRACKET_LOCKED":
+      if (teamCount < 2) {
+        return { valid: false, message: "Need at least 2 teams to lock bracket" };
+      }
+      if (tournament.status !== "REGISTRATION_LOCKED") {
+        return { valid: false, message: "Must close registration first" };
+      }
+      break;
+      
+    case "IN_PROGRESS":
+      if (tournament.status !== "BRACKET_LOCKED") {
+        return { valid: false, message: "Must lock bracket first" };
+      }
+      break;
+      
+    case "COMPLETE":
+      if (tournament.status !== "IN_PROGRESS") {
+        return { valid: false, message: "Tournament must be in progress to complete" };
+      }
+      break;
+  }
+  
+  return { valid: true };
+}
+
 // — Helpers for code & bracket template —
 async function generateUniqueCode() {
   let code
@@ -131,7 +180,6 @@ router.get("/:id", protect, async (req, res) => {
   }
 })
 
-
 // GET bracket template for a phase
 router.get("/:id/bracket-template/:phaseIndex", protect, isRefereeOrOrganizer, async (req, res) => {
   try {
@@ -154,6 +202,12 @@ router.post("/", protect, async (req, res) => {
     if (!name || !description || !startDate || !game || !maxParticipants || !phases?.length) {
       return res.status(400).json({ message: "Missing required fields" })
     }
+    
+    // NEW: Validate maxParticipants
+    if (maxParticipants < 2) {
+      return res.status(400).json({ message: "Tournament must allow at least 2 participants" })
+    }
+    
     const refereeCode = await generateUniqueCode()
     const newTourney = new Tournament({
       name,
@@ -172,9 +226,64 @@ router.post("/", protect, async (req, res) => {
   }
 })
 
-// PUT status transitions
+// PUT update tournament basic info - NEW
+router.put("/:id", protect, isOrganizer, async (req, res) => {
+  try {
+    const { name, description, startDate } = req.body;
+    
+    // Validation
+    if (!name || !description || !startDate) {
+      return res.status(400).json({ message: "Name, description, and start date are required" });
+    }
+    
+    // Check if start date is in the future
+    const startDateObj = new Date(startDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (startDateObj < today) {
+      return res.status(400).json({ message: "Start date cannot be in the past" });
+    }
+    
+    const tournament = await Tournament.findById(req.params.id);
+    if (!tournament) {
+      return res.status(404).json({ message: "Tournament not found" });
+    }
+    
+    // Update only the allowed fields
+    tournament.name = name.trim();
+    tournament.description = description.trim();
+    tournament.startDate = startDate;
+    
+    await tournament.save();
+    
+    console.log("Tournament basic info updated:", tournament._id);
+    res.json(tournament);
+  } catch (err) {
+    console.error("Error updating tournament:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT status transitions - UPDATED WITH VALIDATION
 router.put("/:id/lock-registrations", protect, isOrganizer, async (req, res) => {
   try {
+    const tourney = await Tournament.findById(req.params.id)
+    if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Validate transition
+    if (!validateStatusTransition(tourney.status, "REGISTRATION_LOCKED")) {
+      return res.status(400).json({ 
+        message: `Cannot lock registrations from status: ${tourney.status}` 
+      })
+    }
+    
+    // NEW: Validate readiness
+    const validation = validateTournamentReadiness(tourney, "REGISTRATION_LOCKED")
+    if (!validation.valid) {
+      return res.status(400).json({ message: validation.message })
+    }
+    
     const updated = await Tournament.findByIdAndUpdate(req.params.id, { status: "REGISTRATION_LOCKED" }, { new: true })
     res.json(updated)
   } catch {
@@ -187,6 +296,20 @@ router.put("/:id/lock-bracket", protect, isOrganizer, async (req, res) => {
     // 1) Lock the bracket status
     const tourney = await Tournament.findById(req.params.id)
     if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Validate transition
+    if (!validateStatusTransition(tourney.status, "BRACKET_LOCKED")) {
+      return res.status(400).json({ 
+        message: `Cannot lock bracket from status: ${tourney.status}` 
+      })
+    }
+    
+    // NEW: Validate readiness
+    const validation = validateTournamentReadiness(tourney, "BRACKET_LOCKED")
+    if (!validation.valid) {
+      return res.status(400).json({ message: validation.message })
+    }
+    
     tourney.status = "BRACKET_LOCKED"
     await tourney.save()
 
@@ -215,6 +338,22 @@ router.put("/:id/lock-bracket", protect, isOrganizer, async (req, res) => {
 
 router.put("/:id/start", protect, isRefereeOrOrganizer, async (req, res) => {
   try {
+    const tourney = await Tournament.findById(req.params.id)
+    if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Validate transition
+    if (!validateStatusTransition(tourney.status, "IN_PROGRESS")) {
+      return res.status(400).json({ 
+        message: `Cannot start tournament from status: ${tourney.status}` 
+      })
+    }
+    
+    // NEW: Validate readiness
+    const validation = validateTournamentReadiness(tourney, "IN_PROGRESS")
+    if (!validation.valid) {
+      return res.status(400).json({ message: validation.message })
+    }
+    
     const updated = await Tournament.findByIdAndUpdate(req.params.id, { status: "IN_PROGRESS" }, { new: true })
     res.json(updated)
   } catch {
@@ -224,6 +363,22 @@ router.put("/:id/start", protect, isRefereeOrOrganizer, async (req, res) => {
 
 router.put("/:id/complete", protect, isOrganizer, async (req, res) => {
   try {
+    const tourney = await Tournament.findById(req.params.id)
+    if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Validate transition
+    if (!validateStatusTransition(tourney.status, "COMPLETE")) {
+      return res.status(400).json({ 
+        message: `Cannot complete tournament from status: ${tourney.status}` 
+      })
+    }
+    
+    // NEW: Validate readiness
+    const validation = validateTournamentReadiness(tourney, "COMPLETE")
+    if (!validation.valid) {
+      return res.status(400).json({ message: validation.message })
+    }
+    
     const updated = await Tournament.findByIdAndUpdate(req.params.id, { status: "COMPLETE" }, { new: true })
     res.json(updated)
   } catch {
@@ -276,12 +431,23 @@ router.delete("/:id/referees/:uid", protect, async (req, res) => {
   }
 })
 
-// POST team signup
+// POST team signup - UPDATED WITH VALIDATION
 router.post("/:id/teams", protect, async (req, res) => {
   try {
     const { teamId } = req.body
     const tourney = await Tournament.findById(req.params.id)
     if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Check if registration is still open
+    if (tourney.status !== "REGISTRATION_OPEN") {
+      return res.status(400).json({ message: "Registration is closed for this tournament" })
+    }
+    
+    // NEW: Check if tournament is full
+    if (tourney.teams.length >= tourney.maxParticipants) {
+      return res.status(400).json({ message: "Tournament is full" })
+    }
+    
     if (tourney.pendingTeams.includes(teamId) || tourney.teams.includes(teamId)) {
       return res.status(400).json({ message: "Already requested or joined" })
     }
@@ -303,10 +469,22 @@ router.get("/:id/teams/pending", protect, isOrganizer, async (req, res) => {
   }
 })
 
-// PUT approve team
+// PUT approve team - UPDATED WITH VALIDATION
 router.put("/:id/teams/:tid/approve", protect, isOrganizer, async (req, res) => {
   try {
     const tourney = await Tournament.findById(req.params.id)
+    if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Check if registration is still open
+    if (tourney.status !== "REGISTRATION_OPEN") {
+      return res.status(400).json({ message: "Cannot approve teams - registration is closed" })
+    }
+    
+    // NEW: Check if tournament would be full
+    if (tourney.teams.length >= tourney.maxParticipants) {
+      return res.status(400).json({ message: "Cannot approve - tournament is full" })
+    }
+    
     tourney.pendingTeams = tourney.pendingTeams.filter((t) => t.toString() !== req.params.tid)
     tourney.teams.push(req.params.tid)
     await tourney.save()
@@ -316,7 +494,7 @@ router.put("/:id/teams/:tid/approve", protect, isOrganizer, async (req, res) => 
   }
 })
 
-// DELETE remove team (organizer or self)
+// DELETE remove team (organizer or self) - UPDATED WITH VALIDATION
 router.delete("/:id/teams/:tid", protect, async (req, res) => {
   try {
     const tourney = await Tournament.findById(req.params.id)
@@ -326,6 +504,12 @@ router.delete("/:id/teams/:tid", protect, async (req, res) => {
     if (tourney.organizer.toString() !== req.user.id && !isMyTeam) {
       return res.status(403).json({ message: "Not authorized" })
     }
+    
+    // NEW: Don't allow team removal after bracket is locked
+    if (tourney.status === "BRACKET_LOCKED" || tourney.status === "IN_PROGRESS" || tourney.status === "COMPLETE") {
+      return res.status(400).json({ message: "Cannot remove teams after bracket is locked" })
+    }
+    
     tourney.pendingTeams = tourney.pendingTeams.filter((t) => t.toString() !== req.params.tid)
     tourney.teams = tourney.teams.filter((t) => t.toString() !== req.params.tid)
     await tourney.save()
@@ -335,7 +519,7 @@ router.delete("/:id/teams/:tid", protect, async (req, res) => {
   }
 })
 
-// PUT update phase status
+// PUT update phase status - UPDATED WITH VALIDATION
 router.put("/:id/phases/:idx", protect, isOrganizer, async (req, res) => {
   try {
     const { status } = req.body
@@ -343,6 +527,12 @@ router.put("/:id/phases/:idx", protect, isOrganizer, async (req, res) => {
     if (!tourney.phases[req.params.idx]) {
       return res.status(400).json({ message: "Invalid phase index" })
     }
+    
+    // NEW: Only allow phase updates during tournament
+    if (tourney.status !== "IN_PROGRESS") {
+      return res.status(400).json({ message: "Can only update phases during tournament" })
+    }
+    
     tourney.phases[req.params.idx].status = status
     await tourney.save()
     res.json(tourney.phases[req.params.idx])
@@ -351,12 +541,22 @@ router.put("/:id/phases/:idx", protect, isOrganizer, async (req, res) => {
   }
 })
 
-// PUT save manual bracket - FIXED VERSION
+// PUT save manual bracket - UPDATED WITH VALIDATION
 router.put("/:id/bracket", protect, isOrganizer, async (req, res) => {
   try {
     const { phaseIndex, matches } = req.body
     if (typeof phaseIndex !== "number" || !Array.isArray(matches)) {
       return res.status(400).json({ message: "Invalid payload" })
+    }
+    
+    const tourney = await Tournament.findById(req.params.id)
+    if (!tourney) return res.status(404).json({ message: "Tournament not found" })
+    
+    // NEW: Only allow bracket updates when bracket is locked OR tournament is in progress
+    if (tourney.status !== "BRACKET_LOCKED" && tourney.status !== "IN_PROGRESS") {
+      return res.status(400).json({ 
+        message: "Can only update bracket after it's locked" 
+      })
     }
 
     const results = []

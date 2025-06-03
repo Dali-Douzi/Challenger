@@ -7,31 +7,95 @@ const {
   isRefereeOrOrganizer,
 } = require("../middleware/authMiddleware");
 
-// --- Get one match ---
-// GET /matches/:id
-router.get("/api/matches/:id", protect, isRefereeOrOrganizer, async (req, res) => {
+router.get("/:id", protect, async (req, res) => {
   try {
+    
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      console.log("Invalid ObjectId format:", req.params.id);
+      return res.status(400).json({ message: "Invalid match ID format" });
+    }
+    
     const match = await Match.findById(req.params.id)
       .populate("teamA", "name")
       .populate("teamB", "name")
       .populate("winner", "name");
-    if (!match) return res.status(404).json({ message: "Match not found" });
+    
+    const tournament = await Tournament.findById(match.tournament)
+      .populate("organizer", "_id")
+      .populate("referees", "_id");
+    
+    if (!tournament) {
+      console.log("Tournament not found for match:", match.tournament);
+      return res.status(404).json({ message: "Tournament not found for this match" });
+    }
+    
+    const isOrganizer = tournament.organizer._id.toString() === req.user.id;
+    const isReferee = tournament.referees.some(ref => ref._id.toString() === req.user.id);
+    
+    console.log("Permission check:", { 
+      isOrganizer, 
+      isReferee,
+      tournamentId: tournament._id,
+      organizerId: tournament.organizer._id,
+      currentUserId: req.user.id
+    });
+    
+    if (!isOrganizer && !isReferee) {
+      return res.status(403).json({ message: "Access denied. Only organizers and referees can view match details." });
+    }
+    
+    console.log("=== MATCH FETCH SUCCESS ===");
     res.json(match);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("=== MATCH FETCH ERROR ===");
+    console.error("Error fetching match:", err);
+    res.status(500).json({ message: "Server error: " + err.message });
   }
 });
 
-// --- Update match details & scores with next‐round cascade ---
-// PUT /matches/:id
-router.put("/:id", protect, isRefereeOrOrganizer, async (req, res) => {
+router.put("/:id", protect, async (req, res) => {
   try {
+    
     const { scheduledAt, format, scoreA, scoreB } = req.body;
+    
     const match = await Match.findById(req.params.id);
-    if (!match) return res.status(404).json({ message: "Match not found" });
+    if (!match) {
+      console.log("Match not found for update:", req.params.id);
+      return res.status(404).json({ message: "Match not found" });
+    }
+    
+    console.log("Found match for update:", {
+      _id: match._id,
+      tournament: match.tournament,
+      slot: match.slot,
+      phaseIndex: match.phaseIndex
+    });
 
-    // Update scheduling and format
+    const tournament = await Tournament.findById(match.tournament)
+      .populate("organizer", "_id")
+      .populate("referees", "_id");
+    
+    if (!tournament) {
+      console.log("Tournament not found for match update:", match.tournament);
+      return res.status(404).json({ message: "Tournament not found for this match" });
+    }
+    
+    const isOrganizer = tournament.organizer._id.toString() === req.user.id;
+    const isReferee = tournament.referees.some(ref => ref._id.toString() === req.user.id);
+    
+    console.log("Update permission check:", { 
+      isOrganizer, 
+      isReferee,
+      tournamentId: tournament._id,
+      organizerId: tournament.organizer._id,
+      currentUserId: req.user.id
+    });
+    
+    if (!isOrganizer && !isReferee) {
+      return res.status(403).json({ message: "Access denied. Only organizers and referees can update matches." });
+    }
+
     if (scheduledAt) {
       match.scheduledAt = new Date(scheduledAt);
       match.status = "SCHEDULED";
@@ -40,19 +104,15 @@ router.put("/:id", protect, isRefereeOrOrganizer, async (req, res) => {
       match.format = format;
     }
 
-    // Update scores
     if (scoreA !== undefined) match.scoreA = scoreA;
     if (scoreB !== undefined) match.scoreB = scoreB;
 
-    // Determine winner if both scores set
     if (match.scoreA !== null && match.scoreB !== null) {
       match.winner = match.scoreA > match.scoreB ? match.teamA : match.teamB;
       match.status = "COMPLETED";
 
-      // --- Next‐round cascade logic for SINGLE_ELIM brackets ---
-      const tourney = await Tournament.findById(match.tournament);
       const nextPhaseIndex = match.phaseIndex + 1;
-      const nextPhase = tourney.phases[nextPhaseIndex];
+      const nextPhase = tournament.phases[nextPhaseIndex];
       if (nextPhase?.bracketType === "SINGLE_ELIM") {
         const nextSlot = Math.ceil(match.slot / 2);
         const update = {};
@@ -71,19 +131,26 @@ router.put("/:id", protect, isRefereeOrOrganizer, async (req, res) => {
           { new: true }
         );
       }
-      // (for ROUND_ROBIN or DOUBLE_ELIM, add logic later if needed)
     }
 
     await match.save();
-    res.json(match);
+    
+    const updatedMatch = await Match.findById(match._id)
+      .populate("teamA", "name")
+      .populate("teamB", "name")
+      .populate("winner", "name");
+    
+    console.log("=== MATCH UPDATE SUCCESS ===");
+    console.log("Updated match:", updatedMatch);
+    
+    res.json(updatedMatch);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("=== MATCH UPDATE ERROR ===");
+    console.error("Error updating match:", err);
+    res.status(500).json({ message: "Server error: " + err.message });
   }
 });
 
-// --- List matches by tournament & phase ---
-// GET /matches?tournament=<tourneyId>&phase=<phaseIndex>
 router.get("/", async (req, res) => {
   try {
     const { tournament, phase } = req.query;
@@ -102,7 +169,7 @@ router.get("/", async (req, res) => {
       .sort("slot");
     res.json(matches);
   } catch (err) {
-    console.error(err);
+    console.error("Error fetching matches:", err);
     res.status(500).json({ message: "Server error" });
   }
 });

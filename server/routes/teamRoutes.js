@@ -1,13 +1,71 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const jwt = require("jsonwebtoken");
 const Team = require("../models/Team");
 const User = require("../models/User");
 const Game = require("../models/Game");
 const { protect } = require("../middleware/authMiddleware");
 
+const optionalProtect = (req, res, next) => {
+  const token = req.header("Authorization")?.split(" ")[1];
+
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    console.error("❌ Invalid token:", err.message);
+    // Invalid token, continue without user info instead of failing
+    req.user = null;
+    next();
+  }
+};
+
+// Setup multer for logo uploads
+const logoUploadDir = path.join(__dirname, "../uploads/logos");
+if (!fs.existsSync(logoUploadDir)) {
+  fs.mkdirSync(logoUploadDir, { recursive: true });
+}
+
+const logoStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    cb(null, logoUploadDir);
+  },
+  filename(req, file, cb) {
+    const uniqueName = `${Date.now()}-${Math.round(
+      Math.random() * 1e9
+    )}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+const logoFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed"), false);
+  }
+};
+
+const logoUpload = multer({
+  storage: logoStorage,
+  fileFilter: logoFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+});
+
 /**
  * List teams for the current user if `?mine=true` is passed,
- * otherwise fall back to your existing “my teams” logic.
+ * otherwise fall back to your existing "my teams" logic.
  */
 router.get("/", protect, async (req, res) => {
   const userId = req.user.id;
@@ -33,15 +91,16 @@ router.get("/", protect, async (req, res) => {
 });
 
 /**
- * Create a new team.
+ * Create a new team with optional logo.
  */
-router.post("/create", protect, async (req, res) => {
+router.post("/create", protect, logoUpload.single("logo"), async (req, res) => {
   const { name, game, rank, server } = req.body;
   const userId = req.user.id;
 
   try {
     const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const team = await Team.create({
+
+    const teamData = {
       name,
       game,
       rank,
@@ -49,9 +108,30 @@ router.post("/create", protect, async (req, res) => {
       owner: userId,
       members: [{ user: userId, role: "owner", rank }],
       teamCode,
-    });
+    };
+
+    // Add logo if uploaded
+    if (req.file) {
+      teamData.logo = `uploads/logos/${req.file.filename}`;
+    }
+
+    const team = await Team.create(teamData);
     res.status(201).json(team);
   } catch (err) {
+    // Clean up uploaded file if team creation failed
+    if (req.file) {
+      const filePath = path.join(
+        __dirname,
+        "..",
+        "uploads",
+        "logos",
+        req.file.filename
+      );
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
     if (err.code === 11000 && err.keyPattern?.name) {
       return res.status(400).json({ message: "Team name already exists" });
     }
@@ -81,9 +161,13 @@ router.get("/my", protect, async (req, res) => {
 
 /**
  * Get a team's details (including available ranks for its game).
+ * Team code is only visible to team members who are owners or managers.
+ * This route is publicly accessible but some info is restricted to team members.
  */
-router.get("/:id", protect, async (req, res) => {
+router.get("/:id", optionalProtect, async (req, res) => {
   const teamId = req.params.id;
+  const userId = req.user?.id; // User might be null if not authenticated
+
   try {
     const team = await Team.findById(teamId).populate(
       "members.user",
@@ -94,13 +178,144 @@ router.get("/:id", protect, async (req, res) => {
     const gameDoc = await Game.findOne({ name: team.game });
     const availableRanks = Array.isArray(gameDoc?.ranks) ? gameDoc.ranks : [];
 
+    // Check if user is a member of this team (only if user is authenticated)
+    const userMember = userId
+      ? team.members.find((m) => m.user._id.toString() === userId)
+      : null;
+
+    // Prepare team object
+    const teamObject = team.toObject();
+
+    // Only show team code to authenticated team members who are owners or managers
+    if (!userMember || !["owner", "manager"].includes(userMember.role)) {
+      delete teamObject.teamCode;
+    }
+
     res.status(200).json({
-      ...team.toObject(),
+      ...teamObject,
       availableRanks,
     });
   } catch (err) {
     console.error("Error fetching team:", err);
     res.status(500).json({ message: "Error fetching team details" });
+  }
+});
+
+/**
+ * Upload/Update team logo (owner only).
+ */
+router.put(
+  "/:id/logo",
+  protect,
+  logoUpload.single("logo"),
+  async (req, res) => {
+    const teamId = req.params.id;
+    const userId = req.user.id;
+
+    try {
+      const team = await Team.findById(teamId);
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      // Check if user is the owner
+      if (team.owner.toString() !== userId) {
+        return res
+          .status(403)
+          .json({ message: "Only the owner can update team logo" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "No logo file provided" });
+      }
+
+      // Delete old logo if it exists
+      if (team.logo) {
+        const oldLogoPath = path.join(__dirname, "..", team.logo);
+        if (fs.existsSync(oldLogoPath)) {
+          fs.unlinkSync(oldLogoPath);
+        }
+      }
+
+      // Update team with new logo path
+      team.logo = `uploads/logos/${req.file.filename}`;
+      await team.save();
+
+      const updatedTeam = await Team.findById(teamId).populate(
+        "members.user",
+        "username email"
+      );
+
+      res.status(200).json({
+        message: "Team logo updated successfully",
+        team: updatedTeam,
+      });
+    } catch (err) {
+      console.error("Error updating team logo:", err);
+
+      // Clean up uploaded file if there was an error
+      if (req.file) {
+        const filePath = path.join(
+          __dirname,
+          "..",
+          "uploads",
+          "logos",
+          req.file.filename
+        );
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      res.status(500).json({ message: "Error updating team logo" });
+    }
+  }
+);
+
+/**
+ * Delete team logo (owner only).
+ */
+router.delete("/:id/logo", protect, async (req, res) => {
+  const teamId = req.params.id;
+  const userId = req.user.id;
+
+  try {
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+
+    // Check if user is the owner
+    if (team.owner.toString() !== userId) {
+      return res
+        .status(403)
+        .json({ message: "Only the owner can delete team logo" });
+    }
+
+    // Delete logo file if it exists
+    if (team.logo) {
+      const logoPath = path.join(__dirname, "..", team.logo);
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+      }
+    }
+
+    // Remove logo from team
+    team.logo = "";
+    await team.save();
+
+    const updatedTeam = await Team.findById(teamId).populate(
+      "members.user",
+      "username email"
+    );
+
+    res.status(200).json({
+      message: "Team logo deleted successfully",
+      team: updatedTeam,
+    });
+  } catch (err) {
+    console.error("Error deleting team logo:", err);
+    res.status(500).json({ message: "Error deleting team logo" });
   }
 });
 
@@ -118,6 +333,14 @@ router.delete("/:id", protect, async (req, res) => {
       return res
         .status(403)
         .json({ message: "Only the owner can delete this team" });
+    }
+
+    // Delete team logo if it exists
+    if (team.logo) {
+      const logoPath = path.join(__dirname, "..", team.logo);
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+      }
     }
 
     // Remove team reference from all members

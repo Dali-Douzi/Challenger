@@ -10,10 +10,20 @@ const authRoutes = require("./routes/authRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const gameRoutes = require("./routes/gameRoutes");
 const scrimRoutes = require("./routes/scrimRoutes");
+const chatListRoutes = require("./routes/chatListRoutes");
 const scrimChatRoutes = require("./routes/scrimChatRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const tournamentRoutes = require("./routes/tournamentRoutes");
 const matchRoutes = require("./routes/matchRoutes");
+
+// Import cleanup utilities
+const {
+  schedulePeriodicCleanup,
+  getCleanupStats,
+  runCompleteCleanup,
+} = require("./utils/notificationCleanup");
+
+const seedGames = require("./config/dbSeeder");
 
 dotenv.config();
 
@@ -27,7 +37,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
@@ -42,21 +52,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve uploaded avatars
-app.use(
-  "/uploads/avatars",
-  express.static(path.join(__dirname, "uploads/avatars"))
-);
-
 // Mount API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/games", gameRoutes);
-app.use("/api/scrims", scrimRoutes);
+app.use("/api/chats", chatListRoutes);
 app.use("/api/scrims/chat", scrimChatRoutes);
+app.use("/api/scrims", scrimRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/tournaments", tournamentRoutes);
-app.use("/api/matches", matchRoutes);
 
 // Connect to MongoDB
 const connectDB = async () => {
@@ -66,8 +69,6 @@ const connectDB = async () => {
       socketTimeoutMS: 30000,
     });
     console.log("✅ MongoDB Connected");
-    // Seed initial data if needed
-    const seedGames = require("./config/dbSeeder");
     await seedGames();
   } catch (error) {
     console.error("❌ MongoDB Connection Error:", error);
@@ -76,7 +77,7 @@ const connectDB = async () => {
 };
 connectDB();
 
-// Create HTTP + Socket.IO servers
+// Create HTTP and Socket.IO servers
 const PORT = process.env.PORT || 4444;
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -87,13 +88,9 @@ const io = new Server(server, {
   },
 });
 
-// Delegate all Socket.IO logic
+app.set("io", io);
+// Delegate all Socket.IO logic to socketHandler.js
 require("./socketHandler")(io);
 
-// Kick off any notification cron jobs
-require("./utils/notificationScheduler");
-
 // Start listening
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

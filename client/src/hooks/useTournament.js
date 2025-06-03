@@ -21,9 +21,7 @@ const useTournament = (id) => {
     setMatchesByPhase([]) // Reset on new fetch
 
     try {
-      console.log(`useTournament.js - Fetching tournament data for ID: ${id}`)
       const { data: tourneyData } = await axios.get(`/api/tournaments/${id}`)
-      console.log("useTournament.js - Fetched tourneyData:", JSON.stringify(tourneyData, null, 2))
 
       if (!tourneyData || !tourneyData.phases || !Array.isArray(tourneyData.phases)) {
         console.error("useTournament.js - tourneyData.phases is missing or not an array!")
@@ -46,22 +44,13 @@ const useTournament = (id) => {
         return axios.get(apiUrl)
       })
 
-      console.log(`useTournament.js - Created ${matchPromises.length} match promises.`)
 
       const responses = await Promise.allSettled(matchPromises)
-      console.log(
-        "useTournament.js - Responses from /api/matches calls (allSettled):",
-        JSON.stringify(responses, null, 2),
-      )
 
       const newMatchesByPhaseData = responses.map((response, index) => {
         if (response.status === "fulfilled") {
           // Ensure response.value.data is an array before mapping
           if (response.value && Array.isArray(response.value.data)) {
-            console.log(
-              `useTournament.js - Successfully fetched matches for phase index ${index}:`,
-              JSON.stringify(response.value.data, null, 2),
-            )
             // Transform slot to matchNumber
             return response.value.data.map((match) => {
               if (!match || typeof match.slot === "undefined") {
@@ -87,7 +76,6 @@ const useTournament = (id) => {
       })
 
       setMatchesByPhase(newMatchesByPhaseData)
-      console.log("useTournament.js - Set matchesByPhase to:", JSON.stringify(newMatchesByPhaseData, null, 2))
     } catch (err) {
       console.error("useTournament.js - Critical error in fetchData:", err)
       if (err.response) {

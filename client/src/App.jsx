@@ -22,7 +22,9 @@ import ChatsPage from "./pages/ChatsPage";
 import TournamentDashboard from "./pages/TournamentDashboard";
 import CreateTournamentPage from "./pages/CreateTournamentPage";
 import TournamentPage from "./pages/TournamentPage";
+import EditTournamentPage from "./pages/EditTournamentPage";
 import MatchPage from "./pages/MatchPage";
+import BracketSandbox from "./components/BracketSandbox";
 
 function App() {
   return (
@@ -93,7 +95,6 @@ function App() {
               path="/teams/:id"
               element={
                 <ProtectedRoute>
-                  <Navbar />
                   <TeamProfile />
                 </ProtectedRoute>
               }
@@ -102,7 +103,6 @@ function App() {
               path="/create-team"
               element={
                 <ProtectedRoute>
-                  <Navbar />
                   <CreateTeam />
                 </ProtectedRoute>
               }
@@ -122,16 +122,14 @@ function App() {
               path="/chats"
               element={
                 <ProtectedRoute>
-                  <Navbar />
                   <ChatsPage />
                 </ProtectedRoute>
               }
             />
             <Route
-              path="/chats/:chatId"
+              path="/chats/:scrimId"
               element={
                 <ProtectedRoute>
-                  <Navbar />
                   <ChatsPage />
                 </ProtectedRoute>
               }
@@ -174,6 +172,16 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/tournaments/:id/edit"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <EditTournamentPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/bracket-sandbox" element={<BracketSandbox />} />
 
             {/* 404 fallback */}
             <Route

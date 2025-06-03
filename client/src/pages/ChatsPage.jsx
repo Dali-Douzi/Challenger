@@ -24,20 +24,19 @@ const drawerWidth = 300;
 
 export default function ChatsPage() {
   const navigate = useNavigate();
-  const { scrimId } = useParams();
+  const { chatId } = useParams(); // now chatId is the param name
   const { user } = useContext(AuthContext);
-  const currentTeamId = user.teamId;
 
-  const [chats, setChats] = useState([]);
+  const [chats, setChats] = useState([]); // renamed from “scrims” → “chats”
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Load all chat threads for this user’s teams
+  // 1) Fetch all chats for this user
   useEffect(() => {
     const fetchChats = async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await axios.get("/api/scrims/chat", {
+        const res = await axios.get("/api/chats", {
           headers: { Authorization: `Bearer ${token}` },
         });
         setChats(res.data);
@@ -50,12 +49,12 @@ export default function ChatsPage() {
     fetchChats();
   }, []);
 
-  // Default-select the first chat if none chosen
+  // 2) If no chatId in URL, navigate to first chat in the list
   useEffect(() => {
-    if (!scrimId && chats.length > 0 && chats[0].scrim) {
-      navigate(`/chats/${chats[0].scrim._id}`, { replace: true });
+    if (!chatId && chats.length > 0) {
+      navigate(`/chats/${chats[0]._id}`, { replace: true });
     }
-  }, [scrimId, chats, navigate]);
+  }, [chatId, chats, navigate]);
 
   return (
     <>
@@ -104,45 +103,40 @@ export default function ChatsPage() {
             <Typography color="error" sx={{ p: 2 }}>
               {error}
             </Typography>
-          ) : chats.filter((chat) => chat.scrim).length === 0 ? (
+          ) : chats.length === 0 ? (
             <Typography sx={{ p: 2 }}>No chats yet</Typography>
           ) : (
             <List disablePadding>
-              {chats
-                .filter((chat) => chat.scrim) // only those with a scrim
-                .map((chat) => {
-                  const { scrim, owner, challenger, _id: chatId } = chat;
-                  const opponent =
-                    owner._id === currentTeamId ? challenger : owner;
+              {chats.map((chat) => {
+                // “opponent” logic: whoever isn’t my team is the other team.
+                // chat.scrim.teamA and chat.scrim.teamB are full objects with “_id” and “name”
+                const myTeamId = user.teamId;
+                const teamA = chat.scrim.teamA;
+                const teamB = chat.scrim.teamB;
+                const opponent = teamA._id === myTeamId ? teamB : teamA;
 
-                  // safe date formatting
-                  const time = scrim.scheduledTime
-                    ? new Date(scrim.scheduledTime).toLocaleString()
-                    : "";
-
-                  const id = scrim._id; // URL param is the scrim ID
-                  return (
-                    <ListItemButton
-                      key={chatId}
-                      selected={id === scrimId}
-                      onClick={() => navigate(`/chats/${id}`)}
-                    >
-                      <ListItemText
-                        primary={opponent.name}
-                        secondary={
-                          `${scrim.format || ""}` + (time ? ` • ${time}` : "")
-                        }
-                      />
-                    </ListItemButton>
-                  );
-                })}
+                return (
+                  <ListItemButton
+                    key={chat._id}
+                    selected={chat._id === chatId}
+                    onClick={() => navigate(`/chats/${chat._id}`)}
+                  >
+                    <ListItemText
+                      primary={opponent.name}
+                      secondary={`${chat.scrim.format} • ${new Date(
+                        chat.scrim.scheduledTime
+                      ).toLocaleString()}`}
+                    />
+                  </ListItemButton>
+                );
+              })}
             </List>
           )}
         </Drawer>
 
         {/* Chat pane */}
         <Box flex={1} display="flex" flexDirection="column">
-          {scrimId ? (
+          {chatId ? (
             <ScrimChat />
           ) : (
             <Box

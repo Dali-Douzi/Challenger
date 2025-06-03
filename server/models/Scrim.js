@@ -1,4 +1,3 @@
-// models/Scrim.js
 const mongoose = require("mongoose");
 
 const ScrimSchema = new mongoose.Schema(

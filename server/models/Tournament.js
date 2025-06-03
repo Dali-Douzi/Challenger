@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
-// Define the schema for each phase of the tournament
 const phaseSchema = new Schema(
   {
     bracketType: {
@@ -18,7 +17,6 @@ const phaseSchema = new Schema(
   { timestamps: true }
 );
 
-// Define the tournament schema
 const tournamentSchema = new Schema(
   {
     name: {

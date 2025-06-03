@@ -1,21 +1,7 @@
 const mongoose = require("mongoose");
 
 const ScrimChatSchema = new mongoose.Schema({
-  scrim: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Scrim",
-    required: true,
-  },
-  owner: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Team",
-    required: true,
-  },
-  challenger: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Team",
-    required: true,
-  },
+  scrim: { type: mongoose.Schema.Types.ObjectId, ref: "Scrim", required: true },
   messages: [
     {
       sender: {
@@ -23,14 +9,8 @@ const ScrimChatSchema = new mongoose.Schema({
         ref: "User",
         required: true,
       },
-      text: {
-        type: String,
-        required: true,
-      },
-      timestamp: {
-        type: Date,
-        default: Date.now,
-      },
+      text: { type: String, required: true },
+      timestamp: { type: Date, default: Date.now },
     },
   ],
 });

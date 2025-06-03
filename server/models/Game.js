@@ -6,11 +6,10 @@ const GameSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
-  // ← change this from String to [String]
   servers: {
     type: [String],
     required: true,
-    default: [], // ensures you at least get [] if none supplied
+    default: [],
   },
   ranks: {
     type: [String],

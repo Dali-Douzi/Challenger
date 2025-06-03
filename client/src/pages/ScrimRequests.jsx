@@ -20,20 +20,29 @@ const API_BASE = "http://localhost:4444";
 
 const ScrimRequests = () => {
   const { scrimId } = useParams();
-  // eslint-disable-next-line no-unused-vars
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState({});
   const [error, setError] = useState(null);
 
+  // ✅ DEBUG: Log scrimId
+  console.log("🔍 ScrimRequests - scrimId:", scrimId);
+
   useEffect(() => {
     const fetchRequests = async () => {
       try {
+        console.log("🔍 Fetching scrim details for:", scrimId);
+        
         // GET /api/scrims/:scrimId
         const { data: scrim } = await axios.get(
-          `${API_BASE}/api/scrims/${scrimId}`
+          `${API_BASE}/api/scrims/${scrimId}`,
+          {
+            headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+          }
         );
+
+        console.log("🔍 Fetched scrim data:", scrim);
 
         // Map populated scrim.requests (Team docs) into UI rows
         const mapped = (scrim.requests || []).map((team) => ({
@@ -43,6 +52,8 @@ const ScrimRequests = () => {
           proposedDate: new Date(scrim.scheduledTime).toLocaleString(),
           status: scrim.status,
         }));
+        
+        console.log("🔍 Mapped requests:", mapped);
         setRequests(mapped);
       } catch (err) {
         console.error("🚨 fetchRequests error:", err);
@@ -52,20 +63,40 @@ const ScrimRequests = () => {
       }
     };
 
-    fetchRequests();
+    if (scrimId) {
+      fetchRequests();
+    }
   }, [scrimId]);
 
   const handleAction = async (teamId, action) => {
+    console.log(`🔍 Handling ${action} for team:`, teamId);
+    
     setActionLoading((prev) => ({ ...prev, [teamId]: true }));
     try {
       // PUT /api/scrims/accept/:scrimId or /api/scrims/decline/:scrimId
-      await axios.put(`${API_BASE}/api/scrims/${action}/${scrimId}`, {
+      const response = await axios.put(`${API_BASE}/api/scrims/${action}/${scrimId}`, {
         teamId,
+      }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
       });
+      
+      console.log(`🔍 ${action} response:`, response.data);
+      
       setRequests((prev) => prev.filter((r) => r.id !== teamId));
+      
+      // ✅ ADDED: Redirect to chat after accepting
+      if (action === 'accept') {
+        console.log("🔍 Accept successful, redirecting to chat:", `/chats/${scrimId}`);
+        
+        // Small delay to ensure backend operations complete
+        setTimeout(() => {
+          navigate(`/chats/${scrimId}`);
+        }, 500);
+      }
     } catch (err) {
-      console.error(`Failed to ${action} request ${teamId}:`, err);
-      alert(err.response?.data?.message || err.message);
+      console.error(`🚨 Failed to ${action} request ${teamId}:`, err);
+      const errorMessage = err.response?.data?.message || err.message;
+      alert(`Error: ${errorMessage}`);
     } finally {
       setActionLoading((prev) => ({ ...prev, [teamId]: false }));
     }

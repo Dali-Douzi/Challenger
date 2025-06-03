@@ -14,9 +14,9 @@ import {
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
+const API_BASE = "http://localhost:4444";
 let socket;
 
-// Up to two initials from a name
 const getInitials = (str) =>
   str
     .trim()
@@ -27,7 +27,7 @@ const getInitials = (str) =>
 
 export default function ScrimChat() {
   const { user } = useContext(AuthContext);
-  const { scrimId } = useParams();
+  const { chatId } = useParams(); // this is now the chat‐thread ID
   const navigate = useNavigate();
   const token = localStorage.getItem("token") || "";
 
@@ -38,67 +38,80 @@ export default function ScrimChat() {
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
 
-  // Our user’s ID for message alignment
-  const myId = user?.id || user?._id;
+  // Our user’s ID
+  const myId = user?.id ?? user?._id;
 
-  // Redirect back if no scrimId in URL
+  // 1) If no chatId, just bail
   useEffect(() => {
-    if (!scrimId) navigate("/chats");
-  }, [scrimId, navigate]);
+    if (!chatId) {
+      setError("No chat ID provided in URL");
+      return;
+    }
+    console.log("🔍 ScrimChat mounted with chatId:", chatId);
+  }, [chatId]);
 
-  // Socket.io: join the one-to-one chat room by scrimId
+  // 2) Join the socket.io room for “chatId” and listen for newMessage
   useEffect(() => {
-    if (!scrimId) return;
-    socket = io("/", { auth: { token } });
-    socket.emit("joinRoom", scrimId);
+    if (!chatId) return;
+
+    console.log("🧠 Connecting to socket room:", chatId);
+    socket = io(API_BASE, { auth: { token } });
+    socket.emit("joinRoom", chatId);
     socket.on("newMessage", (msg) => {
+      console.log("📨 New incoming message:", msg);
       setMessages((prev) => [...prev, msg]);
     });
     return () => {
       socket.disconnect();
     };
-  }, [scrimId, token]);
+  }, [chatId, token]);
 
-  // Load scrim metadata and chat messages
+  // 3) Fetch this one chat’s history + scrim metadata in a single call
   useEffect(() => {
-    if (!scrimId) return;
+    if (!chatId) return;
     let mounted = true;
+
     (async () => {
       setLoading(true);
+      console.log("📡 Fetching chat+scrim for", chatId);
       try {
-        const [scrimRes, chatRes] = await Promise.all([
-          axios.get(`/api/scrims/${scrimId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          axios.get(`/api/scrims/chat/${scrimId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        const res = await axios.get(`/api/chats/${chatId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         if (!mounted) return;
-        setScrim(scrimRes.data);
-        setMessages(chatRes.data.messages || []);
+
+        // res.data = { messages: [ … ], scrim: { … } }
+        setMessages(res.data.messages || []);
+        setScrim(res.data.scrim);
       } catch (err) {
-        if (mounted) setError(err.response?.data?.message || err.message);
+        console.error("❌ Fetch error:", err);
+        if (mounted)
+          setError(
+            err.response?.data?.message || err.message || "Unknown error"
+          );
       } finally {
         if (mounted) setLoading(false);
       }
     })();
+
     return () => {
       mounted = false;
     };
-  }, [scrimId, token]);
+  }, [chatId, token]);
 
-  // Auto-scroll as messages arrive
+  // 4) Auto‐scroll when messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // 5) On send, emit `{ chatId, text }`
   const handleSend = () => {
-    if (!text.trim() || !scrimId) return;
-    socket.emit("sendMessage", { scrimId, text });
+    if (!text.trim() || !chatId) return;
+    socket.emit("sendMessage", { chatId, text });
     setText("");
   };
 
+  // 6) Loading / error states
   if (loading) {
     return (
       <Box flex={1} display="flex" alignItems="center" justifyContent="center">
@@ -109,19 +122,20 @@ export default function ScrimChat() {
   if (error) {
     return (
       <Box flex={1} display="flex" alignItems="center" justifyContent="center">
-        <Typography color="error">{error}</Typography>
+        <Typography color="error">⚠️ {error}</Typography>
       </Box>
     );
   }
 
-  // Cluster messages by sender + same minute
+  // 7) Cluster messages by sender + minute (same logic as before)
   const clusters = [];
   messages.forEach((msg) => {
     const senderObj =
       typeof msg.sender === "object" ? msg.sender : { _id: msg.sender };
     const senderId = senderObj._id;
-    const minuteKey = new Date(msg.timestamp).toISOString().slice(0, 16);
+    const minuteKey = new Date(msg.timestamp).toISOString().substr(0, 16);
     const last = clusters[clusters.length - 1];
+
     if (last && last.senderId === senderId && last.minuteKey === minuteKey) {
       last.msgs.push(msg);
     } else {
@@ -129,8 +143,10 @@ export default function ScrimChat() {
     }
   });
 
-  // Header info
-  const headerTitle = `${scrim.teamA.name} vs ${scrim.teamB?.name || "TBD"}`;
+  // 8) Header: show something like “TeamA vs TeamB” and scheduled time + format
+  const opponentA = scrim.teamA;
+  const opponentB = scrim.teamB;
+  const headerTitle = `${opponentA.name} vs ${opponentB?.name || "TBD"}`;
   const headerSub = `${new Date(scrim.scheduledTime).toLocaleString()} — ${
     scrim.format
   }`;
@@ -171,6 +187,7 @@ export default function ScrimChat() {
             ? user.username || user.email || "You"
             : cluster.senderObj.username || "Unknown";
           const avatar = isMine ? user.avatar : cluster.senderObj.avatar;
+
           return (
             <Box
               key={i}
@@ -196,7 +213,7 @@ export default function ScrimChat() {
                 <Typography variant="subtitle2">{name}</Typography>
               </Box>
 
-              {/* Each message in cluster */}
+              {/* Each message in the cluster */}
               {cluster.msgs.map((msg) => {
                 const time = new Date(msg.timestamp).toLocaleTimeString([], {
                   hour: "2-digit",
@@ -230,7 +247,10 @@ export default function ScrimChat() {
                     </Typography>
                     <Typography
                       variant="caption"
-                      sx={{ flexShrink: 0, color: "black" }}
+                      sx={{
+                        flexShrink: 0,
+                        color: "black",
+                      }}
                     >
                       {time}
                     </Typography>

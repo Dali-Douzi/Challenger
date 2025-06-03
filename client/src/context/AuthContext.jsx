@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { createContext, useContext, useState, useEffect } from "react";
-import axios from "axios";
+import api, { API_BASE } from "../utils/axios-config.js";
 
 export const AuthContext = createContext(null);
 
@@ -22,10 +22,9 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-
       try {
-        const { data: profileData } = await axios.get("/api/auth/profile");
+        // ✅ FIXED: Use configured axios instance
+        const { data: profileData } = await api.get("/api/auth/profile");
         console.log("Profile data on init:", profileData);
         setUser({ ...profileData, token });
       } catch (err) {
@@ -41,12 +40,12 @@ export function AuthProvider({ children }) {
   // Login
   const login = async (email, password) => {
     try {
-      const res = await axios.post("/api/auth/login", { email, password });
+      // ✅ FIXED: Use configured axios instance
+      const res = await api.post("/api/auth/login", { email, password });
       const { token } = res.data;
       localStorage.setItem("token", token);
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
-      const { data: profileData } = await axios.get("/api/auth/profile");
+      const { data: profileData } = await api.get("/api/auth/profile");
       setUser({ ...profileData, token });
       return true;
     } catch (err) {
@@ -57,14 +56,14 @@ export function AuthProvider({ children }) {
 
   // Logout
   const logout = () => {
-    delete axios.defaults.headers.common["Authorization"];
     localStorage.removeItem("token");
     setUser(null);
   };
 
   // Update username
   const updateUsername = async (newUsername, currentPassword) => {
-    const res = await axios.patch(`/api/users/${user.id}/username`, {
+    // ✅ FIXED: Use configured axios instance
+    const res = await api.patch(`/api/users/${user.id}/username`, {
       username: newUsername,
       currentPassword,
     });
@@ -73,7 +72,8 @@ export function AuthProvider({ children }) {
 
   // Update email
   const updateEmail = async (newEmail, currentPassword) => {
-    const res = await axios.patch(`/api/users/${user.id}/email`, {
+    // ✅ FIXED: Use configured axios instance
+    const res = await api.patch(`/api/users/${user.id}/email`, {
       email: newEmail,
       currentPassword,
     });
@@ -82,7 +82,8 @@ export function AuthProvider({ children }) {
 
   // Update password
   const updatePassword = async (oldPassword, newPassword) => {
-    await axios.patch(`/api/users/${user.id}/password`, {
+    // ✅ FIXED: Use configured axios instance
+    await api.patch(`/api/users/${user.id}/password`, {
       oldPassword,
       newPassword,
     });
@@ -93,10 +94,11 @@ export function AuthProvider({ children }) {
     const formData = new FormData();
     formData.append("avatar", file);
     try {
-      await axios.put("/api/auth/avatar", formData, {
+      // ✅ FIXED: Use configured axios instance
+      await api.put("/api/auth/avatar", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      const { data: profileData } = await axios.get("/api/auth/profile");
+      const { data: profileData } = await api.get("/api/auth/profile");
       console.log("Profile data after avatar update:", profileData);
       setUser({ ...profileData, token: user.token });
     } catch (err) {

@@ -20,7 +20,6 @@ import PersonIcon from "@mui/icons-material/Person"; // ← fallback icon
 
 const API_BASE = "http://localhost:4444";
 
-// Helper to take up to 2 initials from a display name
 const getInitials = (str) => {
   if (typeof str !== "string" || !str.trim()) return ""; // ← no more “?”
   return str
@@ -35,6 +34,9 @@ export default function Navbar() {
   const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
 
+  // ← Add this line so “token” is available everywhere below
+  const token = localStorage.getItem("token");
+
   const [notifAnchor, setNotifAnchor] = useState(null);
   const [avatarAnchor, setAvatarAnchor] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -48,7 +50,7 @@ export default function Navbar() {
   const fetchNotifications = useCallback(async () => {
     setNotifLoading(true);
     try {
-      const token = localStorage.getItem("token");
+      // use the token we just defined above
       const res = await axios.get(`${API_BASE}/api/notifications`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -58,7 +60,7 @@ export default function Navbar() {
     } finally {
       setNotifLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (user) {
@@ -77,21 +79,28 @@ export default function Navbar() {
 
   const handleNotifClick = async (notif) => {
     try {
+      // mark as read using the same token
       await axios.put(
         `${API_BASE}/api/notifications/${notif._id}/read`,
         {},
         {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+          headers: { Authorization: `Bearer ${token}` },
         }
       );
+
+      // update local state immediately
+      setNotifications((prev) =>
+        prev.map((n) => (n._id === notif._id ? { ...n, read: true } : n))
+      );
+
       closeNotifMenu();
-      if (notif.link) navigate(notif.link);
+      if (notif.url) navigate(notif.url);
     } catch (err) {
       console.error("Error marking notification read:", err);
     }
   };
 
-  // ← clear all “message” notifications when opening chats :contentReference[oaicite:0]{index=0}
+  // ← clear all “message” notifications when opening chats
   const handleChatClick = async () => {
     const toMark = chatNotifications.filter((n) => !n.read);
     try {
@@ -102,7 +111,7 @@ export default function Navbar() {
             {},
             {
               headers: {
-                Authorization: `Bearer ${localStorage.getItem("token")}`,
+                Authorization: `Bearer ${token}`,
               },
             }
           )
@@ -187,10 +196,10 @@ export default function Navbar() {
                 Teams
               </Link>
               <Link
-                to="/tournaments"
+                to="/chats"
                 style={{ color: "white", textDecoration: "none" }}
               >
-                Tournaments
+                Chats
               </Link>
             </Box>
 

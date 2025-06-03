@@ -13,15 +13,15 @@ import axios from "axios";
 
 /**
  * @typedef {Object} Phase
- * @property {'SINGLE_ELIM'|'DOUBLE_ELIM'|'ROUND_ROBIN'} bracketType
+ * @property {'SINGLE_ELIM'|'DOUBLE_ELIM'|'ROUND_ROBIN'|'SWISS_STAGE'|'WILD_CARD'} bracketType
  * @property {'PENDING'|'IN_PROGRESS'|'COMPLETE'} status
  */
 /**
  * @typedef {Object} TournamentInput
  * @property {string} name
  * @property {string} description
- * @property {string} startDate    // format 'YYYY-MM-DD'
- * @property {string} game         // name of the selected game
+ * @property {string} startDate
+ * @property {string} game
  * @property {number} maxParticipants
  * @property {Phase[]} phases
  */
@@ -46,7 +46,6 @@ const TournamentForm = ({ initialData = {}, onSubmit }) => {
     })) || [{ bracketType: "SINGLE_ELIM", status: "PENDING" }]
   );
 
-  // New: games dropdown
   const [games, setGames] = useState([]);
   const [loadingGames, setLoadingGames] = useState(true);
   const [gamesError, setGamesError] = useState("");
@@ -131,7 +130,6 @@ const TournamentForm = ({ initialData = {}, onSubmit }) => {
         />
       </Box>
 
-      {/* Game Dropdown */}
       <Box sx={{ mb: 2 }}>
         {loadingGames ? (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -157,7 +155,6 @@ const TournamentForm = ({ initialData = {}, onSubmit }) => {
         )}
       </Box>
 
-      {/* Max Participants */}
       <Box sx={{ mb: 2 }}>
         <TextField
           label="Max Participants"
@@ -190,6 +187,8 @@ const TournamentForm = ({ initialData = {}, onSubmit }) => {
               <MenuItem value="SINGLE_ELIM">Single Elimination</MenuItem>
               <MenuItem value="DOUBLE_ELIM">Double Elimination</MenuItem>
               <MenuItem value="ROUND_ROBIN">Round Robin</MenuItem>
+              <MenuItem value="SWISS_STAGE">Swiss Stage</MenuItem>
+              <MenuItem value="WILD_CARD">WildCard</MenuItem>
             </TextField>
             <IconButton
               color="error"
