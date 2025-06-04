@@ -17,9 +17,9 @@ const router = express.Router();
 router.get("/", protect, async (req, res) => {
   try {
     const scrims = await Scrim.find()
-      .populate("teamA", "name")
-      .populate("teamB", "name")
-      .populate("requests", "name");
+      .populate("teamA", "name logo game rank server")
+      .populate("teamB", "name logo game rank server")
+      .populate("requests", "name logo");
     res.json(scrims);
   } catch (error) {
     console.error("🔥 List scrims Error:", error);
@@ -183,9 +183,9 @@ router.get("/:scrimId", protect, async (req, res) => {
   }
   try {
     const scrim = await Scrim.findById(scrimId)
-      .populate("teamA", "name owner members game")
-      .populate("teamB", "name")
-      .populate("requests", "name");
+      .populate("teamA", "name logo owner members game rank server")
+      .populate("teamB", "name logo game rank server")
+      .populate("requests", "name logo");
     if (!scrim) {
       return res.status(404).json({ message: "Scrim not found" });
     }

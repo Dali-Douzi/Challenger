@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect } from "react";
+import api from "../utils/api";
 
 /**
  * Custom hook to fetch games and their formats
@@ -16,16 +16,16 @@ const useGameFormats = () => {
       try {
         setLoading(true);
         setError(null);
-        
-        const response = await axios.get('/api/games');
+
+        const response = await api.get("/games"); // ✅ Using api instead of axios
         const gamesData = response.data;
-        
+
         setGames(gamesData);
-        
+
         // Extract all unique formats from all games
         const allFormats = gamesData.reduce((acc, game) => {
           if (game.formats && Array.isArray(game.formats)) {
-            game.formats.forEach(format => {
+            game.formats.forEach((format) => {
               if (!acc.includes(format)) {
                 acc.push(format);
               }
@@ -33,24 +33,24 @@ const useGameFormats = () => {
           }
           return acc;
         }, []);
-        
+
         // Sort formats for better UX
         const sortedFormats = allFormats.sort((a, b) => {
           // Custom sorting: put "Best of X" formats first, then others
-          const aIsBest = a.toLowerCase().startsWith('best of');
-          const bIsBest = b.toLowerCase().startsWith('best of');
-          
+          const aIsBest = a.toLowerCase().startsWith("best of");
+          const bIsBest = b.toLowerCase().startsWith("best of");
+
           if (aIsBest && !bIsBest) return -1;
           if (!aIsBest && bIsBest) return 1;
-          
+
           // If both are "Best of" or neither, sort alphabetically
           return a.localeCompare(b);
         });
-        
+
         setFormats(sortedFormats);
       } catch (err) {
-        console.error('Error fetching games:', err);
-        setError(err.response?.data?.message || 'Failed to fetch game formats');
+        console.error("Error fetching games:", err);
+        setError(err.response?.data?.message || "Failed to fetch game formats");
       } finally {
         setLoading(false);
       }
@@ -61,7 +61,9 @@ const useGameFormats = () => {
 
   // Helper function to get formats for a specific game
   const getFormatsForGame = (gameName) => {
-    const game = games.find(g => g.name.toLowerCase() === gameName.toLowerCase());
+    const game = games.find(
+      (g) => g.name.toLowerCase() === gameName.toLowerCase()
+    );
     return game?.formats || [];
   };
 
@@ -81,7 +83,7 @@ const useGameFormats = () => {
     refetch: () => {
       setLoading(true);
       // Trigger useEffect again by changing a dependency
-    }
+    },
   };
 };
 

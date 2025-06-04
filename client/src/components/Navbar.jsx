@@ -459,23 +459,21 @@ export default function Navbar() {
               </MenuItem>
 
               {/* User's Teams */}
-              {userTeams.length > 0 && (
-                <>
-                  <Divider />
-                  {userTeams.map((team) => (
-                    <MenuItem
-                      key={team._id}
-                      onClick={() => {
-                        closeAvatarMenu();
-                        navigate(`/teams/${team._id}`);
-                      }}
-                      sx={{ pl: 2 }}
-                    >
-                      {team.name}
-                    </MenuItem>
-                  ))}
-                </>
-              )}
+              {userTeams.length > 0 && [
+                <Divider key="teams-divider" />,
+                ...userTeams.map((team) => (
+                  <MenuItem
+                    key={team._id}
+                    onClick={() => {
+                      closeAvatarMenu();
+                      navigate(`/teams/${team._id}`);
+                    }}
+                    sx={{ pl: 2 }}
+                  >
+                    {team.name}
+                  </MenuItem>
+                )),
+              ]}
 
               <Divider />
               <MenuItem

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "../utils/api"; // ✅ Use authenticated API instance
 
 /**
  * Hook to fetch an initial bracket skeleton for a given tournament phase.
@@ -21,8 +21,9 @@ const useBracketTemplate = (tournamentId, phaseIndex) => {
       setLoading(true);
       setError("");
       try {
-        const { data } = await axios.get(
-          `/api/tournaments/${tournamentId}/bracket-template/${phaseIndex}`
+        const { data } = await api.get(
+          // ✅ Using api instead of axios
+          `/tournaments/${tournamentId}/bracket-template/${phaseIndex}` // ✅ Removed /api prefix
         );
         setTemplate(data);
       } catch (err) {

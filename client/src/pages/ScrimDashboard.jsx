@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Box,
   Button,
@@ -13,9 +14,26 @@ import {
   ListItem,
   ListItemText,
   Paper,
+  Avatar,
+  Stack,
+  IconButton,
 } from "@mui/material";
 
+const API_BASE = "http://localhost:4444";
+
+// Helper to get team name initials
+const getTeamInitials = (teamName) => {
+  if (typeof teamName !== "string" || !teamName.trim()) return "";
+  return teamName
+    .trim()
+    .split(/\s+/)
+    .map((word) => word[0].toUpperCase())
+    .slice(0, 2)
+    .join("");
+};
+
 const ScrimDashboard = () => {
+  const navigate = useNavigate();
   const token = localStorage.getItem("token") || "";
 
   const parseJwt = (t) => {
@@ -263,6 +281,62 @@ const ScrimDashboard = () => {
     setSelectedRankFilter("");
   };
 
+  // Helper to render team with logo
+  const renderTeamWithLogo = (team) => {
+    if (!team) return "Unknown";
+
+    const teamLogo = team.logo
+      ? `http://localhost:4444/${team.logo}?t=${Date.now()}`
+      : null;
+
+    const teamInitials = getTeamInitials(team.name);
+
+    const handleTeamClick = () => {
+      navigate(`/teams/${team._id}`);
+    };
+
+    return (
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <IconButton
+          onClick={handleTeamClick}
+          sx={{
+            p: 0,
+            "&:hover": {
+              transform: "scale(1.05)",
+              transition: "transform 0.2s ease-in-out",
+            },
+          }}
+        >
+          <Avatar
+            src={teamLogo}
+            sx={{
+              width: 32,
+              height: 32,
+              fontSize: "0.75rem",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            {!teamLogo && teamInitials}
+          </Avatar>
+        </IconButton>
+        <Typography
+          variant="body2"
+          component="span"
+          onClick={handleTeamClick}
+          sx={{
+            cursor: "pointer",
+            "&:hover": {
+              textDecoration: "underline",
+            },
+          }}
+        >
+          {team.name}
+        </Typography>
+      </Stack>
+    );
+  };
+
   if (loading.teams || loading.games || loading.scrims) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
@@ -474,10 +548,6 @@ const ScrimDashboard = () => {
                 btnAction = () => handleSendRequest(s._id);
               }
 
-              const title = s.teamB?.name
-                ? `${s.teamA?.name} vs ${s.teamB.name}`
-                : s.teamA?.name || "Unknown";
-
               return (
                 <ListItem
                   key={s._id}
@@ -488,16 +558,35 @@ const ScrimDashboard = () => {
                     justifyContent: "space-between",
                   }}
                 >
-                  <ListItemText
-                    primary={title}
-                    secondary={`Format: ${s.format} | Time: ${new Date(
-                      s.scheduledTime
-                    ).toLocaleString()} | Status: ${s.status}`}
-                  />
+                  <Box sx={{ flex: 1 }}>
+                    {/* Team logos and names */}
+                    <Box sx={{ mb: 1 }}>
+                      {s.teamB ? (
+                        <Stack direction="row" alignItems="center" spacing={2}>
+                          {renderTeamWithLogo(s.teamA)}
+                          <Typography variant="body2" sx={{ mx: 1 }}>
+                            vs
+                          </Typography>
+                          {renderTeamWithLogo(s.teamB)}
+                        </Stack>
+                      ) : (
+                        renderTeamWithLogo(s.teamA)
+                      )}
+                    </Box>
+
+                    {/* Scrim details */}
+                    <Typography variant="body2" color="text.secondary">
+                      Format: {s.format} | Time:{" "}
+                      {new Date(s.scheduledTime).toLocaleString()} | Status:{" "}
+                      {s.status}
+                    </Typography>
+                  </Box>
+
                   <Button
                     variant="outlined"
                     onClick={btnAction}
                     disabled={btnDisabled}
+                    sx={{ ml: 2 }}
                   >
                     {btnText}
                   </Button>

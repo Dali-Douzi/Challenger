@@ -1,18 +1,34 @@
 import React, { useState } from "react";
-import { Box, Button, Typography, Alert, Stack, Chip, Divider } from "@mui/material";
-import axios from "axios";
+import {
+  Box,
+  Button,
+  Typography,
+  Alert,
+  Stack,
+  Chip,
+  Divider,
+} from "@mui/material";
+import api from "../utils/api";
 
 const ControlsSection = ({ tournament, onAction }) => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { _id: id, status, phases, isOrganizer, isReferee, teams, maxParticipants } = tournament;
+  const {
+    _id: id,
+    status,
+    phases,
+    isOrganizer,
+    isReferee,
+    teams,
+    maxParticipants,
+  } = tournament;
 
-  // Generalized action helper: prefixes "/api/tournaments"
+  // Generalized action helper: prefixes "/tournaments"
   const handleAction = async (url, method = "put", data = null) => {
     try {
       setError("");
       setLoading(true);
-      await axios[method](`/api/tournaments/${id}${url}`, data);
+      await api[method](`/tournaments/${id}${url}`, data); // ✅ Using api instead of axios
       onAction(); // Refresh tournament data
     } catch (err) {
       setError(err.response?.data?.message || "Error performing action");
@@ -43,37 +59,40 @@ const ControlsSection = ({ tournament, onAction }) => {
   // Get current status info
   const getStatusInfo = () => {
     const teamCount = teams?.length || 0;
-    
+
     switch (status) {
       case "REGISTRATION_OPEN":
         return {
           message: `Teams can join. Current: ${teamCount}/${maxParticipants}`,
-          nextStep: teamCount >= 2 ? "You can close registration when ready" : "Need at least 2 teams to proceed"
+          nextStep:
+            teamCount >= 2
+              ? "You can close registration when ready"
+              : "Need at least 2 teams to proceed",
         };
       case "REGISTRATION_LOCKED":
         return {
           message: "Registration is closed. Ready to set up bracket.",
-          nextStep: "Lock the bracket to enable team placement"
+          nextStep: "Lock the bracket to enable team placement",
         };
       case "BRACKET_LOCKED":
         return {
           message: "Bracket is ready. Place teams in their starting positions.",
-          nextStep: "Start the tournament when bracket setup is complete"
+          nextStep: "Start the tournament when bracket setup is complete",
         };
       case "IN_PROGRESS":
         return {
           message: "Tournament is active. Matches can be played and scored.",
-          nextStep: "Complete matches and advance through rounds"
+          nextStep: "Complete matches and advance through rounds",
         };
       case "COMPLETE":
         return {
           message: "Tournament has ended.",
-          nextStep: null
+          nextStep: null,
         };
       default:
         return {
           message: "Unknown status",
-          nextStep: null
+          nextStep: null,
         };
     }
   };
@@ -91,29 +110,38 @@ const ControlsSection = ({ tournament, onAction }) => {
       )}
 
       {/* Current Status Display */}
-      <Box mb={3} sx={{ p: 2, bgcolor: "rgba(255,255,255,0.05)", borderRadius: 2 }}>
+      <Box
+        mb={3}
+        sx={{ p: 2, bgcolor: "rgba(255,255,255,0.05)", borderRadius: 2 }}
+      >
         <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
           <Typography variant="h6">Tournament Status:</Typography>
-          <Chip 
-            label={status?.replace(/_/g, " ") || "Unknown"} 
+          <Chip
+            label={status?.replace(/_/g, " ") || "Unknown"}
             color={(() => {
               switch (status) {
-                case "REGISTRATION_OPEN": return "info";
-                case "REGISTRATION_LOCKED": return "warning";
-                case "BRACKET_LOCKED": return "warning";
-                case "IN_PROGRESS": return "success";
-                case "COMPLETE": return "default";
-                default: return "error";
+                case "REGISTRATION_OPEN":
+                  return "info";
+                case "REGISTRATION_LOCKED":
+                  return "warning";
+                case "BRACKET_LOCKED":
+                  return "warning";
+                case "IN_PROGRESS":
+                  return "success";
+                case "COMPLETE":
+                  return "default";
+                default:
+                  return "error";
               }
             })()}
             variant="filled"
           />
         </Box>
-        
+
         <Typography variant="body2" sx={{ mb: 1 }}>
           {statusInfo.message}
         </Typography>
-        
+
         {statusInfo.nextStep && (
           <Typography variant="body2" color="text.secondary">
             Next: {statusInfo.nextStep}
@@ -121,11 +149,13 @@ const ControlsSection = ({ tournament, onAction }) => {
         )}
 
         {/* Team Count Warning */}
-        {status === "REGISTRATION_OPEN" && (teams?.length || 0) >= maxParticipants && (
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            Maximum participants reached ({maxParticipants}). Consider closing registration.
-          </Alert>
-        )}
+        {status === "REGISTRATION_OPEN" &&
+          (teams?.length || 0) >= maxParticipants && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Maximum participants reached ({maxParticipants}). Consider closing
+              registration.
+            </Alert>
+          )}
       </Box>
 
       {/* ORGANIZER CONTROLS */}
@@ -134,7 +164,7 @@ const ControlsSection = ({ tournament, onAction }) => {
           <Typography variant="h6" gutterBottom>
             Organizer Actions
           </Typography>
-          
+
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 2 }}>
             {/* 1) Close Registration */}
             {status === "REGISTRATION_OPEN" && (
@@ -200,7 +230,7 @@ const ControlsSection = ({ tournament, onAction }) => {
           <Typography variant="h6" gutterBottom>
             Referee Actions
           </Typography>
-          
+
           {/* Referees can help start tournament once bracket is locked */}
           {status === "BRACKET_LOCKED" && (
             <Button
@@ -212,7 +242,7 @@ const ControlsSection = ({ tournament, onAction }) => {
               Start Tournament
             </Button>
           )}
-          
+
           {status !== "BRACKET_LOCKED" && (
             <Typography variant="body2" color="text.secondary">
               Referee actions will be available once the bracket is locked.
@@ -233,13 +263,13 @@ const ControlsSection = ({ tournament, onAction }) => {
               {phases.map((phase, idx) => (
                 <Box
                   key={idx}
-                  sx={{ 
-                    display: "flex", 
-                    alignItems: "center", 
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
                     gap: 2,
                     p: 2,
                     bgcolor: "rgba(255,255,255,0.03)",
-                    borderRadius: 1
+                    borderRadius: 1,
                   }}
                 >
                   <Box sx={{ flexGrow: 1 }}>
@@ -296,7 +326,10 @@ const ControlsSection = ({ tournament, onAction }) => {
 
       {/* PROGRESS INDICATOR */}
       {teams && teams.length > 0 && (
-        <Box mt={3} sx={{ p: 2, bgcolor: "rgba(255,255,255,0.03)", borderRadius: 1 }}>
+        <Box
+          mt={3}
+          sx={{ p: 2, bgcolor: "rgba(255,255,255,0.03)", borderRadius: 1 }}
+        >
           <Typography variant="subtitle2" gutterBottom>
             Tournament Progress
           </Typography>

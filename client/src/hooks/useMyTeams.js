@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import api from "../utils/api"; // ✅ Use authenticated API instance
 
 /**
  * Hook to fetch teams belonging to the current user.
@@ -15,7 +15,8 @@ const useMyTeams = () => {
       setLoading(true);
       setError("");
       try {
-        const { data } = await axios.get("/api/teams", {
+        const { data } = await api.get("/teams", {
+          // ✅ Using api instead of axios
           params: { mine: true },
         });
         setTeams(data);

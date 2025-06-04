@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Container, Typography, Box, Button, Alert } from "@mui/material";
-import axios from "axios";
+import api from "../utils/api"; // ✅ Use authenticated API
 import TournamentForm from "../components/TournamentForm";
 import ActionModal from "../components/ActionModal";
 
@@ -15,7 +15,7 @@ const CreateTournamentPage = () => {
 
   const handleCreate = async (formData) => {
     try {
-      const { data } = await axios.post("/api/tournaments", formData);
+      const { data } = await api.post("/tournaments", formData); // ✅ Using api instead of axios
       setRefCode(data.refereeCode);
       setTourneyId(data._id);
       setShowCode(true);
@@ -26,8 +26,8 @@ const CreateTournamentPage = () => {
 
   const handleRefereeJoin = async (code) => {
     try {
-      const res = await axios.get(`/api/tournaments/code/${code}`);
-      await axios.post(`/api/tournaments/${res.data._id}/referees`, { code });
+      const res = await api.get(`/tournaments/code/${code}`); // ✅ Using api instead of axios
+      await api.post(`/tournaments/${res.data._id}/referees`, { code }); // ✅ Using api instead of axios
       navigate(`/tournaments/${res.data._id}`);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Invalid referee code");

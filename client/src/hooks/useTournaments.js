@@ -19,7 +19,11 @@ const useTournaments = () => {
       setLoading(true);
       setError("");
       try {
-        const { data } = await axios.get("/api/tournaments");
+        // Add auth header manually for now
+        const token = localStorage.getItem("token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+        const { data } = await axios.get("/api/tournaments", { headers });
         setTournaments(data);
       } catch (err) {
         setError(err.response?.data?.message || err.message);

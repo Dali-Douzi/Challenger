@@ -12,23 +12,23 @@ import {
   Stack,
 } from "@mui/material";
 import { ArrowBack, Save } from "@mui/icons-material";
-import axios from "axios";
+import api from "../utils/api"; // ✅ Use authenticated API
 
 const EditTournamentPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  
+
   const [formData, setFormData] = useState({
     name: "",
     description: "",
     startDate: "",
   });
-  
+
   const [originalData, setOriginalData] = useState({});
 
   // Fetch tournament data
@@ -36,14 +36,14 @@ const EditTournamentPage = () => {
     const fetchTournament = async () => {
       try {
         setLoading(true);
-        const { data } = await axios.get(`/api/tournaments/${id}`);
-        
+        const { data } = await api.get(`/tournaments/${id}`); // ✅ Using api instead of axios
+
         const tournamentData = {
           name: data.name,
           description: data.description,
           startDate: data.startDate ? data.startDate.substring(0, 10) : "", // Format for date input
         };
-        
+
         setFormData(tournamentData);
         setOriginalData(tournamentData);
       } catch (err) {
@@ -59,9 +59,9 @@ const EditTournamentPage = () => {
   }, [id]);
 
   const handleInputChange = (field) => (event) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [field]: event.target.value
+      [field]: event.target.value,
     }));
   };
 
@@ -69,28 +69,28 @@ const EditTournamentPage = () => {
     try {
       setSaving(true);
       setError("");
-      
+
       // Validation
       if (!formData.name.trim()) {
         setError("Tournament name is required");
         return;
       }
-      
+
       if (!formData.description.trim()) {
         setError("Tournament description is required");
         return;
       }
-      
+
       if (!formData.startDate) {
         setError("Tournament start date is required");
         return;
       }
-      
+
       // Check if start date is in the future
       const startDate = new Date(formData.startDate);
       const today = new Date();
       today.setHours(0, 0, 0, 0); // Reset time to start of day
-      
+
       if (startDate < today) {
         setError("Start date cannot be in the past");
         return;
@@ -103,16 +103,15 @@ const EditTournamentPage = () => {
         startDate: formData.startDate,
       };
 
-      await axios.put(`/api/tournaments/${id}`, updateData);
-      
+      await api.put(`/tournaments/${id}`, updateData); // ✅ Using api instead of axios
+
       setSuccessMessage("Tournament updated successfully!");
       setOriginalData(formData); // Update original data
-      
+
       // Redirect back to tournament page after short delay
       setTimeout(() => {
         navigate(`/tournaments/${id}`);
       }, 1500);
-      
     } catch (err) {
       setError(err.response?.data?.message || "Failed to update tournament");
     } finally {
@@ -196,16 +195,14 @@ const EditTournamentPage = () => {
             variant="outlined"
             InputLabelProps={{ shrink: true }}
             inputProps={{
-              min: new Date().toISOString().split('T')[0] // Prevent past dates
+              min: new Date().toISOString().split("T")[0], // Prevent past dates
             }}
           />
 
-          <Box sx={{ display: "flex", gap: 2, justifyContent: "flex-end", mt: 4 }}>
-            <Button
-              variant="outlined"
-              onClick={handleCancel}
-              disabled={saving}
-            >
+          <Box
+            sx={{ display: "flex", gap: 2, justifyContent: "flex-end", mt: 4 }}
+          >
+            <Button variant="outlined" onClick={handleCancel} disabled={saving}>
               Cancel
             </Button>
             <Button
@@ -223,8 +220,9 @@ const EditTournamentPage = () => {
       {/* Warning about tournament status */}
       <Alert severity="info" sx={{ mt: 3 }}>
         <Typography variant="body2">
-          <strong>Note:</strong> You can only edit basic tournament information. 
-          To modify participants, phases, or bracket settings, use the tournament management controls on the main tournament page.
+          <strong>Note:</strong> You can only edit basic tournament information.
+          To modify participants, phases, or bracket settings, use the
+          tournament management controls on the main tournament page.
         </Typography>
       </Alert>
     </Container>

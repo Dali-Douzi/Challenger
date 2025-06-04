@@ -15,7 +15,10 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useAuth } from "../context/AuthContext";
 import MemberRow from "../components/MemberRow";
 
@@ -39,6 +42,7 @@ const TeamProfile = () => {
   const [availableRanks, setAvailableRanks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [copyTooltip, setCopyTooltip] = useState("Copy join code");
 
   // Logo upload states
   const [openLogoDialog, setOpenLogoDialog] = useState(false);
@@ -81,6 +85,26 @@ const TeamProfile = () => {
     }
     setLogoPreview("");
   }, [logoFile]);
+
+  // Copy join code to clipboard
+  const handleCopyJoinCode = async () => {
+    try {
+      await navigator.clipboard.writeText(team.teamCode);
+      setCopyTooltip("Copied!");
+      setTimeout(() => setCopyTooltip("Copy join code"), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = team.teamCode;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setCopyTooltip("Copied!");
+      setTimeout(() => setCopyTooltip("Copy join code"), 2000);
+    }
+  };
 
   // Guard clause: handle case where user is not logged in (viewing as guest)
   const currentMember = team?.members.find((m) => m.user?._id === user?._id);
@@ -253,12 +277,30 @@ const TeamProfile = () => {
               <Box>
                 <Typography variant="h4">{team.name}</Typography>
                 {canSeeTeamCode && (
-                  <Typography
-                    variant="subtitle2"
-                    sx={{ color: "white", mt: 1, mb: 1 }}
+                  <Box
+                    sx={{ display: "flex", alignItems: "center", mt: 1, mb: 1 }}
                   >
-                    Join Code: <strong>{team.teamCode}</strong>
-                  </Typography>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ color: "white", mr: 1 }}
+                    >
+                      Join Code: <strong>{team.teamCode}</strong>
+                    </Typography>
+                    <Tooltip title={copyTooltip} arrow>
+                      <IconButton
+                        onClick={handleCopyJoinCode}
+                        size="small"
+                        sx={{
+                          color: "white",
+                          "&:hover": {
+                            backgroundColor: "rgba(255, 255, 255, 0.1)",
+                          },
+                        }}
+                      >
+                        <ContentCopyIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 )}
                 <Typography variant="subtitle1" color="textSecondary">
                   Game: {team.game} | Rank: {team.rank} | Server: {team.server}

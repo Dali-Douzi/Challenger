@@ -24,7 +24,6 @@ import CreateTournamentPage from "./pages/CreateTournamentPage";
 import TournamentPage from "./pages/TournamentPage";
 import EditTournamentPage from "./pages/EditTournamentPage";
 import MatchPage from "./pages/MatchPage";
-import BracketSandbox from "./components/BracketSandbox";
 
 function App() {
   return (
@@ -181,7 +180,6 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/bracket-sandbox" element={<BracketSandbox />} />
 
             {/* 404 fallback */}
             <Route
