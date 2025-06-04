@@ -5,7 +5,7 @@ const Notification = require("../models/Notification");
 const Team = require("../models/Team");
 
 /**
- * @desc    Get unread notifications for teams the user owns or manages
+ * @desc    Get notifications for teams the user owns or manages
  * @route   GET /api/notifications
  * @access  Private
  */
@@ -17,22 +17,30 @@ router.get("/", protect, async (req, res, next) => {
     }).select("_id");
     const teamIds = teams.map((t) => t._id);
 
-    // 2. Fetch only unread notifications for those teams
+    // 2. Fetch ALL notifications for those teams (not just unread)
+    //    But prioritize unread ones and limit total results
     const notes = await Notification.find({
       team: { $in: teamIds },
-      read: false,
     })
-      .sort({ createdAt: -1 })
-      .limit(20)
+      .sort({ read: 1, createdAt: -1 }) // Unread first, then by newest
+      .limit(50) // Reasonable limit
       .populate("chat", "_id")
       .lean();
 
     console.log(
       "🔔 GET /api/notifications →",
       notes.length,
-      "unread notifications for teams",
+      "notifications for teams",
       teamIds
     );
+
+    // Separate unread and read for logging
+    const unreadCount = notes.filter((n) => !n.read).length;
+    const readCount = notes.filter((n) => n.read).length;
+    console.log(
+      `🔔 Returning ${unreadCount} unread, ${readCount} read notifications`
+    );
+
     return res.json(notes);
   } catch (err) {
     next(err);

@@ -4,6 +4,8 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const { Server } = require("socket.io");
 
 const authRoutes = require("./routes/authRoutes");
@@ -29,9 +31,78 @@ dotenv.config();
 
 const app = express();
 
+// Create upload directories
+const avatarUploadDir = path.join(__dirname, "uploads/avatars");
+const logoUploadDir = path.join(__dirname, "uploads/logos");
+
+if (!fs.existsSync(avatarUploadDir)) {
+  fs.mkdirSync(avatarUploadDir, { recursive: true });
+}
+
+if (!fs.existsSync(logoUploadDir)) {
+  fs.mkdirSync(logoUploadDir, { recursive: true });
+}
+
+// Avatar upload configuration
+const avatarStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    cb(null, avatarUploadDir);
+  },
+  filename(req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, `avatar_${req.user.id}${ext}`);
+  },
+});
+
+// Logo upload configuration
+const logoStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    cb(null, logoUploadDir);
+  },
+  filename(req, file, cb) {
+    const uniqueName = `${Date.now()}-${Math.round(
+      Math.random() * 1e9
+    )}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+// File filter for images only
+const imageFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed"), false);
+  }
+};
+
+// Create multer instances
+const avatarUpload = multer({
+  storage: avatarStorage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+});
+
+const logoUpload = multer({
+  storage: logoStorage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+});
+
+// Make multer instances available to routes
+app.set("avatarUpload", avatarUpload);
+app.set("logoUpload", logoUpload);
+
 // Body parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files (for uploaded images)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // CORS
 app.use(
@@ -52,14 +123,21 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  console.log(`🌐 ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // Mount API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/games", gameRoutes);
 app.use("/api/chats", chatListRoutes);
-app.use("/api/scrims/chat", scrimChatRoutes);
+app.use("/api/scrims/chats", scrimChatRoutes);
 app.use("/api/scrims", scrimRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/tournaments", tournamentRoutes);
+app.use("/api/matches", matchRoutes);
 
 // Connect to MongoDB
 const connectDB = async () => {

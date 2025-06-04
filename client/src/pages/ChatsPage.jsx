@@ -1,10 +1,11 @@
 import React, { useContext, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import axios from "axios";
 
 import Navbar from "../components/Navbar";
 import ScrimChat from "./ScrimChat";
 import { AuthContext } from "../context/AuthContext";
+import { io } from "socket.io-client";
 
 import {
   Box,
@@ -24,37 +25,113 @@ const drawerWidth = 300;
 
 export default function ChatsPage() {
   const navigate = useNavigate();
-  const { chatId } = useParams(); // now chatId is the param name
+  const location = useLocation();
+  const { chatId } = useParams();
   const { user } = useContext(AuthContext);
 
-  const [chats, setChats] = useState([]); // renamed from “scrims” → “chats”
+  const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const socketRef = React.useRef(null);
 
-  // 1) Fetch all chats for this user
+  // Function to fetch chats
+  const fetchChats = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      const res = await axios.get("/api/chats", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setChats(res.data);
+      console.log("💬 Fetched chats:", res.data?.length || 0);
+    } catch (err) {
+      console.error("Error fetching chats:", err);
+      setError(err.response?.data?.message || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 1) Fetch all chats for this user on mount
   useEffect(() => {
-    const fetchChats = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        const res = await axios.get("/api/chats", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setChats(res.data);
-      } catch (err) {
-        setError(err.response?.data?.message || err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchChats();
   }, []);
 
-  // 2) If no chatId in URL, navigate to first chat in the list
+  // 2) Re-fetch chats when navigating to /chats (e.g., from notifications)
+  useEffect(() => {
+    // Check if we just navigated here (e.g., from accepting a scrim request)
+    if (location.pathname === "/chats" && !chatId) {
+      console.log("💬 Navigated to /chats - refreshing chat list");
+      fetchChats();
+    }
+  }, [location.pathname, chatId]);
+
+  // 3) If no chatId in URL, navigate to first chat in the list
   useEffect(() => {
     if (!chatId && chats.length > 0) {
+      console.log("💬 Auto-selecting first chat:", chats[0]._id);
       navigate(`/chats/${chats[0]._id}`, { replace: true });
     }
   }, [chatId, chats, navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    console.log("🔌 Connecting to Socket.IO for chat list updates...");
+
+    socketRef.current = io("http://localhost:4444", {
+      auth: { token },
+    });
+
+    // Listen for scrim deletions that affect this user
+    socketRef.current.on("scrimDeleted", (data) => {
+      console.log("🗑️ Scrim deleted:", data);
+
+      // Check if this affects the current user's team
+      if (user.teamId && data.teamId === user.teamId.toString()) {
+        console.log("🗑️ Scrim deletion affects my team - refreshing chat list");
+
+        // Remove the deleted scrim's chat from local state
+        setChats((prev) =>
+          prev.filter((chat) => chat.scrim._id !== data.scrimId)
+        );
+
+        // If we're currently viewing the deleted chat, navigate away
+        if (
+          chatId &&
+          chats.find(
+            (chat) => chat._id === chatId && chat.scrim._id === data.scrimId
+          )
+        ) {
+          console.log(
+            "🗑️ Currently viewing deleted chat - navigating to first available"
+          );
+          const remainingChats = chats.filter(
+            (chat) => chat.scrim._id !== data.scrimId
+          );
+          if (remainingChats.length > 0) {
+            navigate(`/chats/${remainingChats[0]._id}`, { replace: true });
+          } else {
+            navigate("/chats", { replace: true });
+          }
+        }
+
+        // Optional: Show notification
+        // toast.info(`Scrim deleted by ${data.message}`);
+      }
+    });
+
+    // Cleanup
+    return () => {
+      if (socketRef.current) {
+        console.log("🔌 Disconnecting ChatsPage Socket.IO...");
+        socketRef.current.disconnect();
+      }
+    };
+  }, [user, chatId, chats, navigate]);
 
   return (
     <>
@@ -108,8 +185,7 @@ export default function ChatsPage() {
           ) : (
             <List disablePadding>
               {chats.map((chat) => {
-                // “opponent” logic: whoever isn’t my team is the other team.
-                // chat.scrim.teamA and chat.scrim.teamB are full objects with “_id” and “name”
+                // "opponent" logic: whoever isn't my team is the other team.
                 const myTeamId = user.teamId;
                 const teamA = chat.scrim.teamA;
                 const teamB = chat.scrim.teamB;
@@ -119,10 +195,13 @@ export default function ChatsPage() {
                   <ListItemButton
                     key={chat._id}
                     selected={chat._id === chatId}
-                    onClick={() => navigate(`/chats/${chat._id}`)}
+                    onClick={() => {
+                      console.log("💬 Selecting chat:", chat._id);
+                      navigate(`/chats/${chat._id}`);
+                    }}
                   >
                     <ListItemText
-                      primary={opponent.name}
+                      primary={opponent?.name || "Unknown Team"}
                       secondary={`${chat.scrim.format} • ${new Date(
                         chat.scrim.scheduledTime
                       ).toLocaleString()}`}
@@ -137,7 +216,7 @@ export default function ChatsPage() {
         {/* Chat pane */}
         <Box flex={1} display="flex" flexDirection="column">
           {chatId ? (
-            <ScrimChat />
+            <ScrimChat key={chatId} /> // Add key prop to force re-render when chatId changes
           ) : (
             <Box
               flex={1}
@@ -145,7 +224,9 @@ export default function ChatsPage() {
               alignItems="center"
               justifyContent="center"
             >
-              <Typography>Select a chat to get started</Typography>
+              <Typography color="white">
+                {loading ? "Loading chats..." : "Select a chat to get started"}
+              </Typography>
             </Box>
           )}
         </Box>

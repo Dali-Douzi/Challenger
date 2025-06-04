@@ -2,28 +2,8 @@ const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 const User = require("../models/User");
 const { protect } = require("../middleware/authMiddleware");
-
-const uploadDir = path.join(__dirname, "../uploads/avatars");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename(req, file, cb) {
-    const ext = path.extname(file.originalname);
-    cb(null, `avatar_${req.user.id}${ext}`);
-  },
-});
-
-const upload = multer({ storage });
 
 router.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
@@ -116,18 +96,33 @@ router.put("/update", protect, async (req, res) => {
   }
 });
 
-router.put("/avatar", protect, upload.single("avatar"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-    user.avatar = `/uploads/avatars/${req.file.filename}`;
-    await user.save();
-    res.status(200).json({ avatar: user.avatar });
-  } catch (err) {
-    console.error("🔥 Avatar upload error:", err);
-    res.status(500).json({ message: "Upload failed", error: err.message });
-  }
+router.put("/avatar", protect, (req, res) => {
+  // Get the avatar upload middleware from app
+  const avatarUpload = req.app.get("avatarUpload");
+
+  // Use the middleware
+  avatarUpload.single("avatar")(req, res, async (err) => {
+    if (err) {
+      console.error("🔥 Avatar upload error:", err);
+      return res.status(400).json({ message: err.message });
+    }
+
+    try {
+      if (!req.file)
+        return res.status(400).json({ message: "No file uploaded" });
+
+      const user = await User.findById(req.user.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      user.avatar = `/uploads/avatars/${req.file.filename}`;
+      await user.save();
+
+      res.status(200).json({ avatar: user.avatar });
+    } catch (err) {
+      console.error("🔥 Avatar upload error:", err);
+      res.status(500).json({ message: "Upload failed", error: err.message });
+    }
+  });
 });
 
 module.exports = router;

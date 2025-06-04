@@ -140,7 +140,7 @@ router.post("/request/:scrimId", protect, async (req, res) => {
       await chat.save();
     }
 
-    await Notification.create({
+    const notification = await Notification.create({
       team: scrim.teamA,
       scrim: scrim._id,
       chat: chat._id,
@@ -148,6 +148,18 @@ router.post("/request/:scrimId", protect, async (req, res) => {
       type: "request",
       url: `/scrims/${scrim._id}/requests`,
     });
+
+    // 🚨 EMIT SOCKET EVENT
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("newNotification", {
+        teamId: scrim.teamA, // Only notify the scrim owner (Team A)
+        notification: notification,
+      });
+      console.log(
+        `🔔 Emitted scrim request notification to team ${scrim.teamA}`
+      );
+    }
 
     // 7) Return success
     return res.json({ message: "Scrim request sent", scrim });
@@ -173,7 +185,7 @@ router.get("/:scrimId", protect, async (req, res) => {
     const scrim = await Scrim.findById(scrimId)
       .populate("teamA", "name owner members game")
       .populate("teamB", "name")
-      .populate("requests", "name"); // ← populate the pending‐requests array
+      .populate("requests", "name");
     if (!scrim) {
       return res.status(404).json({ message: "Scrim not found" });
     }
@@ -233,7 +245,7 @@ router.put("/:scrimId", protect, async (req, res) => {
 });
 
 /**
- * @desc    Delete a scrim (owner/manager only)
+ * @desc    Delete a scrim (owner/manager only) with cascade cleanup
  * @route   DELETE /api/scrims/:scrimId
  * @access  Private
  */
@@ -267,14 +279,67 @@ router.delete("/:scrimId", protect, async (req, res) => {
         .json({ message: "Only the owner or a manager can delete this scrim" });
     }
 
-    // 4. Delete via model method
-    await Scrim.findByIdAndDelete(scrimId);
+    console.log(`🗑️ Starting cascade delete for scrim ${scrimId}`);
 
-    // 5. Success response
-    return res.json({ message: "Scrim removed" });
+    // 4. CASCADE DELETE: Find and delete related chat
+    const chat = await ScrimChat.findOne({ scrim: scrimId });
+    if (chat) {
+      console.log(`🗑️ Deleting chat ${chat._id} for scrim ${scrimId}`);
+      await ScrimChat.findByIdAndDelete(chat._id);
+
+      // Emit Socket.IO event to notify users that chat is no longer available
+      const io = req.app.get("io");
+      if (io) {
+        io.to(chat._id.toString()).emit("chatDeleted", {
+          message: "This scrim has been deleted by the organizer",
+        });
+      }
+    }
+
+    // 5. CASCADE DELETE: Delete related notifications
+    const deletedNotifications = await Notification.deleteMany({
+      scrim: scrimId,
+    });
+    console.log(
+      `🗑️ Deleted ${deletedNotifications.deletedCount} notifications for scrim ${scrimId}`
+    );
+
+    // 6. Delete the scrim itself
+    await Scrim.findByIdAndDelete(scrimId);
+    console.log(`🗑️ Deleted scrim ${scrimId}`);
+
+    // 7. Emit Socket.IO event for real-time UI updates
+    const io = req.app.get("io");
+    if (io) {
+      // Notify all relevant teams that the scrim was deleted
+      const allTeams = [
+        scrim.teamA.toString(),
+        ...(Array.isArray(scrim.requests)
+          ? scrim.requests.map((id) => id.toString())
+          : []),
+        ...(scrim.teamB ? [scrim.teamB.toString()] : []),
+      ];
+
+      allTeams.forEach((teamId) => {
+        io.emit("scrimDeleted", {
+          teamId: teamId,
+          scrimId: scrimId,
+          message: `Scrim deleted by ${team.name}`,
+        });
+      });
+    }
+
+    // 8. Success response
+    return res.json({
+      message: "Scrim and related data removed successfully",
+      details: {
+        scrimDeleted: true,
+        chatDeleted: !!chat,
+        notificationsDeleted: deletedNotifications.deletedCount,
+      },
+    });
   } catch (error) {
-    console.error("🔥 Scrim-delete Error:", error);
-    // Return the actual error message (and stack if you like) for debugging
+    console.error("🔥 Scrim cascade delete Error:", error);
     return res
       .status(500)
       .json({ message: error.message || "Server error", error: error.stack });
@@ -299,7 +364,7 @@ router.put("/accept/:scrimId", protect, async (req, res) => {
   }
 
   try {
-    // 2) Load scrim & verify it’s open
+    // 2) Load scrim & verify it's open
     const scrim = await Scrim.findById(scrimId);
     if (!scrim) return res.status(404).json({ message: "Scrim not found" });
     if (scrim.status !== "open") {
@@ -338,31 +403,50 @@ router.put("/accept/:scrimId", protect, async (req, res) => {
     scrim.requests = [];
     await scrim.save();
 
-    // 6) Ensure chat thread exists
+    // 6) Ensure chat thread exists and is fully saved
     let chat = await ScrimChat.findOne({ scrim: scrim._id });
     if (!chat) {
       chat = new ScrimChat({ scrim: scrim._id, messages: [] });
       await chat.save();
+      console.log(`💬 Created new chat for scrim ${scrim._id}:`, chat._id);
+    } else {
+      console.log(`💬 Chat already exists for scrim ${scrim._id}:`, chat._id);
     }
 
     // 7) Notify challenging team
-    await Notification.create({
+    const acceptNotification = await Notification.create({
       team: teamId,
       scrim: scrim._id,
       chat: chat._id,
       message: `${postingTeam.name} accepted your scrim request`,
       type: "accept",
-      url: "/chats",
+      // url: "/chats", // ← REMOVED: No redirection for accept notifications
     });
 
-    await Notification.create({
+    const feedbackNotification = await Notification.create({
       team: scrim.teamA,
       scrim: scrim._id,
       chat: chat._id,
       message: `You accepted ${requestingTeam.name}'s request`,
       type: "accept-feedback",
-      url: "/chats",
+      // url: "/chats", // ← REMOVED: No redirection for feedback notifications
     });
+
+    // 🚨 EMIT SOCKET EVENTS
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("newNotification", {
+        teamId: teamId, // Notify the requesting team
+        notification: acceptNotification,
+      });
+      io.emit("newNotification", {
+        teamId: scrim.teamA, // Notify the accepting team
+        notification: feedbackNotification,
+      });
+      console.log(
+        `🔔 Emitted accept notifications to teams ${teamId} and ${scrim.teamA}`
+      );
+    }
 
     return res.json({ message: "Scrim request accepted", scrim });
   } catch (error) {
@@ -427,7 +511,7 @@ router.put("/decline/:scrimId", protect, async (req, res) => {
     }
 
     // 7) Notify the declined team
-    await Notification.create({
+    const notification = await Notification.create({
       team: teamId,
       scrim: scrim._id,
       chat: chat._id,
@@ -435,6 +519,16 @@ router.put("/decline/:scrimId", protect, async (req, res) => {
       type: "decline",
       url: "/chats",
     });
+
+    // 🚨 EMIT SOCKET EVENT
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("newNotification", {
+        teamId: teamId, // Only notify the declined team
+        notification: notification,
+      });
+      console.log(`🔔 Emitted decline notification to team ${teamId}`);
+    }
 
     return res.json({ message: "Scrim request declined", scrim });
   } catch (error) {

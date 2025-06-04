@@ -127,7 +127,7 @@ function App() {
               }
             />
             <Route
-              path="/chats/:scrimId"
+              path="/chats/:chatId"
               element={
                 <ProtectedRoute>
                   <ChatsPage />

@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const jwt = require("jsonwebtoken");
@@ -28,40 +27,6 @@ const optionalProtect = (req, res, next) => {
     next();
   }
 };
-
-// Setup multer for logo uploads
-const logoUploadDir = path.join(__dirname, "../uploads/logos");
-if (!fs.existsSync(logoUploadDir)) {
-  fs.mkdirSync(logoUploadDir, { recursive: true });
-}
-
-const logoStorage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, logoUploadDir);
-  },
-  filename(req, file, cb) {
-    const uniqueName = `${Date.now()}-${Math.round(
-      Math.random() * 1e9
-    )}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
-
-const logoFileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/")) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed"), false);
-  }
-};
-
-const logoUpload = multer({
-  storage: logoStorage,
-  fileFilter: logoFileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-});
 
 /**
  * List teams for the current user if `?mine=true` is passed,
@@ -93,53 +58,64 @@ router.get("/", protect, async (req, res) => {
 /**
  * Create a new team with optional logo.
  */
-router.post("/create", protect, logoUpload.single("logo"), async (req, res) => {
-  const { name, game, rank, server } = req.body;
-  const userId = req.user.id;
+router.post("/create", protect, (req, res) => {
+  // Get the logo upload middleware from app
+  const logoUpload = req.app.get("logoUpload");
 
-  try {
-    const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-
-    const teamData = {
-      name,
-      game,
-      rank,
-      server,
-      owner: userId,
-      members: [{ user: userId, role: "owner", rank }],
-      teamCode,
-    };
-
-    // Add logo if uploaded
-    if (req.file) {
-      teamData.logo = `uploads/logos/${req.file.filename}`;
+  // Use the middleware
+  logoUpload.single("logo")(req, res, async (err) => {
+    if (err) {
+      console.error("🔥 Logo upload error:", err);
+      return res.status(400).json({ message: err.message });
     }
 
-    const team = await Team.create(teamData);
-    res.status(201).json(team);
-  } catch (err) {
-    // Clean up uploaded file if team creation failed
-    if (req.file) {
-      const filePath = path.join(
-        __dirname,
-        "..",
-        "uploads",
-        "logos",
-        req.file.filename
-      );
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    const { name, game, rank, server } = req.body;
+    const userId = req.user.id;
+
+    try {
+      const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+      const teamData = {
+        name,
+        game,
+        rank,
+        server,
+        owner: userId,
+        members: [{ user: userId, role: "owner", rank }],
+        teamCode,
+      };
+
+      // Add logo if uploaded
+      if (req.file) {
+        teamData.logo = `uploads/logos/${req.file.filename}`;
       }
-    }
 
-    if (err.code === 11000 && err.keyPattern?.name) {
-      return res.status(400).json({ message: "Team name already exists" });
+      const team = await Team.create(teamData);
+      res.status(201).json(team);
+    } catch (err) {
+      // Clean up uploaded file if team creation failed
+      if (req.file) {
+        const filePath = path.join(
+          __dirname,
+          "..",
+          "uploads",
+          "logos",
+          req.file.filename
+        );
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      if (err.code === 11000 && err.keyPattern?.name) {
+        return res.status(400).json({ message: "Team name already exists" });
+      }
+      console.error("Team creation error:", err);
+      res
+        .status(500)
+        .json({ message: "Error creating team", error: err.message });
     }
-    console.error("Team creation error:", err);
-    res
-      .status(500)
-      .json({ message: "Error creating team", error: err.message });
-  }
+  });
 });
 
 /**
@@ -204,11 +180,17 @@ router.get("/:id", optionalProtect, async (req, res) => {
 /**
  * Upload/Update team logo (owner only).
  */
-router.put(
-  "/:id/logo",
-  protect,
-  logoUpload.single("logo"),
-  async (req, res) => {
+router.put("/:id/logo", protect, (req, res) => {
+  // Get the logo upload middleware from app
+  const logoUpload = req.app.get("logoUpload");
+
+  // Use the middleware
+  logoUpload.single("logo")(req, res, async (err) => {
+    if (err) {
+      console.error("🔥 Logo upload error:", err);
+      return res.status(400).json({ message: err.message });
+    }
+
     const teamId = req.params.id;
     const userId = req.user.id;
 
@@ -269,8 +251,8 @@ router.put(
 
       res.status(500).json({ message: "Error updating team logo" });
     }
-  }
-);
+  });
+});
 
 /**
  * Delete team logo (owner only).

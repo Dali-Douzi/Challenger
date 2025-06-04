@@ -1,295 +1,384 @@
-import React, { useContext, useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useContext, useRef } from "react";
+import { useParams } from "react-router-dom";
 import axios from "axios";
-import io from "socket.io-client";
+import { io } from "socket.io-client";
 import { AuthContext } from "../context/AuthContext";
 import {
   Box,
   Typography,
-  Paper,
   TextField,
-  IconButton,
-  Avatar,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
   CircularProgress,
+  Alert,
+  Paper,
 } from "@mui/material";
-import SendIcon from "@mui/icons-material/Send";
 
-const API_BASE = "http://localhost:4444";
-let socket;
-
-const getInitials = (str) =>
-  str
-    .trim()
-    .split(/\s+/)
-    .map((w) => w[0].toUpperCase())
-    .slice(0, 2)
-    .join("");
-
-export default function ScrimChat() {
+const ScrimChat = () => {
+  const { chatId } = useParams();
   const { user } = useContext(AuthContext);
-  const { chatId } = useParams(); // this is now the chat‐thread ID
-  const navigate = useNavigate();
-  const token = localStorage.getItem("token") || "";
 
-  const [scrim, setScrim] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [text, setText] = useState("");
+  const [scrim, setScrim] = useState(null);
+  const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const bottomRef = useRef(null);
+  const [sending, setSending] = useState(false);
 
-  // Our user’s ID
-  const myId = user?.id ?? user?._id;
+  // Socket.IO connection
+  const socketRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
-  // 1) If no chatId, just bail
-  useEffect(() => {
-    if (!chatId) {
-      setError("No chat ID provided in URL");
-      return;
-    }
-    console.log("🔍 ScrimChat mounted with chatId:", chatId);
-  }, [chatId]);
-
-  // 2) Join the socket.io room for “chatId” and listen for newMessage
-  useEffect(() => {
-    if (!chatId) return;
-
-    console.log("🧠 Connecting to socket room:", chatId);
-    socket = io(API_BASE, { auth: { token } });
-    socket.emit("joinRoom", chatId);
-    socket.on("newMessage", (msg) => {
-      console.log("📨 New incoming message:", msg);
-      setMessages((prev) => [...prev, msg]);
-    });
-    return () => {
-      socket.disconnect();
-    };
-  }, [chatId, token]);
-
-  // 3) Fetch this one chat’s history + scrim metadata in a single call
-  useEffect(() => {
-    if (!chatId) return;
-    let mounted = true;
-
-    (async () => {
-      setLoading(true);
-      console.log("📡 Fetching chat+scrim for", chatId);
-      try {
-        const res = await axios.get(`/api/chats/${chatId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!mounted) return;
-
-        // res.data = { messages: [ … ], scrim: { … } }
-        setMessages(res.data.messages || []);
-        setScrim(res.data.scrim);
-      } catch (err) {
-        console.error("❌ Fetch error:", err);
-        if (mounted)
-          setError(
-            err.response?.data?.message || err.message || "Unknown error"
-          );
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [chatId, token]);
-
-  // 4) Auto‐scroll when messages change
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // 5) On send, emit `{ chatId, text }`
-  const handleSend = () => {
-    if (!text.trim() || !chatId) return;
-    socket.emit("sendMessage", { chatId, text });
-    setText("");
+  // Scroll to bottom when new messages arrive
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 6) Loading / error states
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Initialize Socket.IO connection
+  useEffect(() => {
+    if (!chatId) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setError("No authentication token found");
+      return;
+    }
+
+    console.log("🔌 Connecting to Socket.IO for chat...");
+
+    // Connect to your server
+    socketRef.current = io("http://localhost:4444", {
+      auth: { token },
+    });
+
+    // Join the chat room
+    socketRef.current.emit("joinRoom", chatId);
+
+    // Listen for new messages
+    socketRef.current.on("newMessage", (messageData) => {
+      console.log("📨 New message received:", messageData);
+      setMessages((prev) => [...prev, messageData]);
+    });
+
+    // Handle connection events
+    socketRef.current.on("connect", () => {
+      console.log("🔌 ScrimChat connected to Socket.IO");
+    });
+
+    socketRef.current.on("disconnect", () => {
+      console.log("🔌 ScrimChat disconnected from Socket.IO");
+    });
+
+    socketRef.current.on("connect_error", (error) => {
+      console.error("🔌 Socket connection error:", error);
+      setError("Failed to connect to real-time chat");
+    });
+
+    // Handle custom errors from server
+    socketRef.current.on("error", (error) => {
+      console.error("🔌 Socket error:", error);
+      setError(error);
+    });
+
+    // Cleanup on unmount
+    return () => {
+      console.log("🔌 Disconnecting ScrimChat Socket.IO...");
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [chatId]);
+
+  // Fetch initial chat data
+  useEffect(() => {
+    if (!chatId) {
+      setError("No chat ID provided");
+      setLoading(false);
+      return;
+    }
+
+    fetchChatData();
+  }, [chatId]);
+
+  const fetchChatData = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setError("No authentication token found");
+        return;
+      }
+
+      console.log("🐛 Fetching chat data for chatId:", chatId);
+      console.log("🐛 API URL:", `/api/scrims/chats/${chatId}`);
+
+      const response = await axios.get(`/api/scrims/chats/${chatId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log("🐛 Chat data received:", response.data);
+
+      setMessages(response.data.messages || []);
+      setScrim(response.data.scrim);
+    } catch (err) {
+      console.error("🐛 Error fetching chat:", err);
+      console.error("🐛 Error response:", err.response);
+      console.error("🐛 Error status:", err.response?.status);
+      console.error("🐛 Error data:", err.response?.data);
+      setError(
+        err.response?.data?.message || `Failed to load chat: ${err.message}`
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Send message via HTTP (reliable method)
+  const sendMessage = async () => {
+    if (!newMessage.trim()) return;
+
+    try {
+      setSending(true);
+
+      const token = localStorage.getItem("token");
+      const response = await axios.post(
+        `/api/scrims/chats/${chatId}`,
+        { text: newMessage },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      console.log("📤 Message sent:", response.data);
+
+      // Clear input - Socket.IO will handle adding the message to the UI
+      setNewMessage("");
+    } catch (err) {
+      console.error("Error sending message:", err);
+      setError(err.response?.data?.message || "Failed to send message");
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (loading) {
     return (
-      <Box flex={1} display="flex" alignItems="center" justifyContent="center">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        height="100%"
+      >
         <CircularProgress />
+        <Typography sx={{ ml: 2, color: "white" }}>Loading chat...</Typography>
       </Box>
     );
   }
+
   if (error) {
     return (
-      <Box flex={1} display="flex" alignItems="center" justifyContent="center">
-        <Typography color="error">⚠️ {error}</Typography>
+      <Box p={2}>
+        <Alert severity="error">{error}</Alert>
       </Box>
     );
   }
 
-  // 7) Cluster messages by sender + minute (same logic as before)
-  const clusters = [];
-  messages.forEach((msg) => {
-    const senderObj =
-      typeof msg.sender === "object" ? msg.sender : { _id: msg.sender };
-    const senderId = senderObj._id;
-    const minuteKey = new Date(msg.timestamp).toISOString().substr(0, 16);
-    const last = clusters[clusters.length - 1];
-
-    if (last && last.senderId === senderId && last.minuteKey === minuteKey) {
-      last.msgs.push(msg);
-    } else {
-      clusters.push({ senderId, senderObj, minuteKey, msgs: [msg] });
-    }
-  });
-
-  // 8) Header: show something like “TeamA vs TeamB” and scheduled time + format
-  const opponentA = scrim.teamA;
-  const opponentB = scrim.teamB;
-  const headerTitle = `${opponentA.name} vs ${opponentB?.name || "TBD"}`;
-  const headerSub = `${new Date(scrim.scheduledTime).toLocaleString()} — ${
-    scrim.format
-  }`;
+  if (!chatId) {
+    return (
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        height="100%"
+      >
+        <Typography color="white">No chat selected</Typography>
+      </Box>
+    );
+  }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Header */}
-      <Box
-        sx={{
-          p: 2,
-          bgcolor: "background.paper",
-          boxShadow: 1,
-          display: "flex",
-          justifyContent: "space-between",
-        }}
-      >
-        <Typography variant="h6">{headerTitle}</Typography>
-        <Typography variant="body2" color="textSecondary">
-          {headerSub}
-        </Typography>
-      </Box>
+    <Box
+      display="flex"
+      flexDirection="column"
+      height="100%"
+      sx={{ color: "white" }}
+    >
+      {/* Chat header */}
+      {scrim && (
+        <Box
+          p={2}
+          borderBottom={1}
+          borderColor="divider"
+          sx={{ bgcolor: "rgba(255,255,255,0.05)" }}
+        >
+          <Typography variant="h6" color="white">
+            Chat: {scrim.teamA?.name} vs {scrim.teamB?.name || "TBD"}
+          </Typography>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)" }}>
+            {scrim.format} • {new Date(scrim.scheduledTime).toLocaleString()}
+          </Typography>
+          {/* Connection status */}
+          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.5)" }}>
+            {socketRef.current?.connected ? "🟢 Connected" : "🔴 Disconnected"}
+          </Typography>
+        </Box>
+      )}
 
-      {/* Messages */}
-      <Paper
-        square
-        sx={{
-          flex: 1,
-          p: 2,
-          bgcolor: "grey.50",
-          display: "flex",
-          flexDirection: "column",
-          overflowY: "auto",
-        }}
-      >
-        {clusters.map((cluster, i) => {
-          const isMine = cluster.senderId === myId;
-          const name = isMine
-            ? user.username || user.email || "You"
-            : cluster.senderObj.username || "Unknown";
-          const avatar = isMine ? user.avatar : cluster.senderObj.avatar;
+      {/* Messages list */}
+      <Box flex={1} overflow="auto" p={1}>
+        {messages.length === 0 ? (
+          <Box
+            display="flex"
+            justifyContent="center"
+            alignItems="center"
+            height="100%"
+          >
+            <Typography color="rgba(255,255,255,0.7)">
+              No messages yet. Start the conversation!
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {messages.map((message, index) => {
+              // Clean message positioning logic
+              const isMyMessage = message.sender?.username === user?.username;
 
-          return (
-            <Box
-              key={i}
-              sx={{
-                mb: 3,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: isMine ? "flex-end" : "flex-start",
-              }}
-            >
-              {/* Avatar & name once */}
-              <Box
-                sx={{
-                  display: "flex",
-                  flexDirection: isMine ? "row-reverse" : "row",
-                  alignItems: "center",
-                  mb: 1,
-                }}
-              >
-                <Avatar src={avatar} sx={{ width: 32, height: 32, mx: 1 }}>
-                  {!avatar && getInitials(name)}
-                </Avatar>
-                <Typography variant="subtitle2">{name}</Typography>
-              </Box>
-
-              {/* Each message in the cluster */}
-              {cluster.msgs.map((msg) => {
-                const time = new Date(msg.timestamp).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hour12: false,
-                });
-                return (
-                  <Box
-                    key={msg._id}
+              return (
+                <Box
+                  key={index}
+                  sx={{
+                    display: "flex",
+                    justifyContent: isMyMessage ? "flex-end" : "flex-start",
+                    width: "100%",
+                    mb: 1,
+                  }}
+                >
+                  <Paper
+                    elevation={2}
                     sx={{
-                      px: 1.5,
-                      py: 1,
-                      borderRadius: 2,
-                      bgcolor: isMine ? "primary.main" : "grey.300",
-                      color: "black",
-                      mb: 1,
+                      p: 1.5,
                       maxWidth: "70%",
-                      display: "flex",
-                      flexDirection: isMine ? "row-reverse" : "row",
-                      alignItems: "flex-end",
+                      minWidth: "120px",
+                      bgcolor: isMyMessage
+                        ? "rgba(25, 118, 210, 0.3)" // Your messages - blue
+                        : "rgba(255,255,255,0.15)", // Their messages - lighter
+                      color: "white",
+                      borderRadius: 2,
+                      position: "relative",
+                      // Chat bubble tail effect
+                      "&::before": isMyMessage
+                        ? {
+                            content: '""',
+                            position: "absolute",
+                            top: "12px",
+                            right: "-6px",
+                            width: 0,
+                            height: 0,
+                            border: "6px solid transparent",
+                            borderLeftColor: "rgba(25, 118, 210, 0.3)",
+                          }
+                        : {
+                            content: '""',
+                            position: "absolute",
+                            top: "12px",
+                            left: "-6px",
+                            width: 0,
+                            height: 0,
+                            border: "6px solid transparent",
+                            borderRightColor: "rgba(255,255,255,0.15)",
+                          },
                     }}
                   >
+                    {/* Message text */}
                     <Typography
-                      sx={{
-                        flex: 1,
-                        wordBreak: "break-word",
-                        ...(isMine ? { ml: 1 } : { mr: 1 }),
-                      }}
+                      variant="body1"
+                      sx={{ mb: 0.5, wordBreak: "break-word" }}
                     >
-                      {msg.text}
+                      {message.text}
                     </Typography>
+
+                    {/* Message metadata */}
                     <Typography
                       variant="caption"
                       sx={{
-                        flexShrink: 0,
-                        color: "black",
+                        color: "rgba(255,255,255,0.6)",
+                        display: "block",
+                        textAlign: isMyMessage ? "right" : "left",
+                        fontSize: "0.7rem",
                       }}
                     >
-                      {time}
+                      {!isMyMessage &&
+                        `${message.sender?.username || "Unknown"} • `}
+                      {new Date(message.timestamp).toLocaleString()}
                     </Typography>
-                  </Box>
-                );
-              })}
-            </Box>
-          );
-        })}
-        <div ref={bottomRef} />
-      </Paper>
+                  </Paper>
+                </Box>
+              );
+            })}
+          </Box>
+        )}
+        {/* Invisible element to scroll to */}
+        <div ref={messagesEndRef} />
+      </Box>
 
-      {/* Input */}
+      {/* Message input */}
       <Box
-        component="form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSend();
-        }}
-        sx={{
-          p: 2,
-          bgcolor: "background.paper",
-          boxShadow: 1,
-          display: "flex",
-          alignItems: "center",
-        }}
+        p={2}
+        borderTop={1}
+        borderColor="divider"
+        sx={{ bgcolor: "rgba(255,255,255,0.05)" }}
       >
-        <TextField
-          fullWidth
-          size="small"
-          variant="outlined"
-          placeholder="Type your message…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <IconButton onClick={handleSend} disabled={!text.trim()} sx={{ ml: 1 }}>
-          <SendIcon />
-        </IconButton>
+        <Box display="flex" gap={1}>
+          <TextField
+            fullWidth
+            placeholder="Type a message..."
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            disabled={sending}
+            variant="outlined"
+            size="small"
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                color: "white",
+                "& fieldset": {
+                  borderColor: "rgba(255, 255, 255, 0.23)",
+                },
+                "&:hover fieldset": {
+                  borderColor: "rgba(255, 255, 255, 0.5)",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "primary.main",
+                },
+              },
+              "& .MuiInputLabel-root": {
+                color: "rgba(255, 255, 255, 0.7)",
+              },
+            }}
+          />
+          <Button
+            variant="contained"
+            onClick={sendMessage}
+            disabled={sending || !newMessage.trim()}
+            size="small"
+          >
+            {sending ? "Sending..." : "Send"}
+          </Button>
+        </Box>
       </Box>
     </Box>
   );
-}
+};
+
+export default ScrimChat;
