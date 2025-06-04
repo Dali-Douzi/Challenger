@@ -17,7 +17,7 @@ const useGameFormats = () => {
         setLoading(true);
         setError(null);
 
-        const response = await api.get("/games"); // ✅ Using api instead of axios
+        const response = await api.get("/games");
         const gamesData = response.data;
 
         setGames(gamesData);

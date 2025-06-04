@@ -106,8 +106,12 @@ const TeamProfile = () => {
     }
   };
 
-  // Guard clause: handle case where user is not logged in (viewing as guest)
-  const currentMember = team?.members.find((m) => m.user?._id === user?._id);
+  // Determine the currently‐logged‐in user's membership by comparing IDs as strings
+  const currentMember = team?.members.find((m) => {
+    // If m.user is populated (an object), use m.user._id; otherwise m.user is already an ObjectId/string
+    const memberId = m.user?._id ? m.user._id.toString() : m.user.toString();
+    return memberId === user?._id;
+  });
   const currentUserRole = currentMember?.role;
   const isTeamMember = !!currentMember;
 

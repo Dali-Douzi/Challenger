@@ -312,7 +312,7 @@ export default function Navbar() {
         <Typography
           variant="h6"
           sx={{ flexGrow: 1, cursor: "pointer" }}
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/dashboard")}
         >
           Challenger
         </Typography>

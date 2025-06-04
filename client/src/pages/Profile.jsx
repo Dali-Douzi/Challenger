@@ -44,12 +44,21 @@ const Profile = () => {
 
   useEffect(() => {
     if (user) {
+      // Pull the token from localStorage
+      const token = localStorage.getItem("token");
+
+      // Include Authorization header when calling the protected endpoint
       axios
-        .get(`/api/teams/my`)
+        .get(`${API_URL}/api/teams/my`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
         .then((res) => {
           const teamsWithRole = res.data.map((team) => {
+            // Compare populated member.user._id to authenticated user._id
             const member = team.members.find(
-              (m) => m.user.toString() === user.id
+              (m) => m.user._id.toString() === user._id
             );
             return { team, role: member?.role || "player" };
           });

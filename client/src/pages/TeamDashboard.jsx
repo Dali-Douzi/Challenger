@@ -76,7 +76,7 @@ const TeamDashboard = () => {
 
   return (
     <Container maxWidth="sm">
-      <Box sx={{ p: 4 }}>
+      <Box sx={{ p: 4, color: "white" }}>
         <Typography variant="h5" gutterBottom>
           Your Teams
         </Typography>

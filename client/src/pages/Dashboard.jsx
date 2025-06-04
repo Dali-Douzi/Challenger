@@ -50,7 +50,7 @@ const Dashboard = () => {
     >
       <Container maxWidth="lg">
         {/* Hero Section */}
-        <Box sx={{ py: 10, textAlign: "center" }}>
+        <Box sx={{ py: 10, textAlign: "center", color: "white" }}>
           <Typography variant="h2" sx={{ fontWeight: "bold", mb: 3 }}>
             Welcome to{" "}
             <Box

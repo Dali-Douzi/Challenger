@@ -347,7 +347,7 @@ const ScrimDashboard = () => {
 
   return (
     <Container maxWidth="md">
-      <Box sx={{ p: 4 }}>
+      <Box sx={{ p: 4, color: "white" }}>
         <Typography variant="h5" gutterBottom>
           Scrim Dashboard
         </Typography>

@@ -1,5 +1,12 @@
-import React, { useState, useCallback, useEffect, useReducer } from "react";
-import { DndContext, useDraggable, useDroppable } from "@dnd-kit/core";
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+} from "react";
+import { DndContext } from "@dnd-kit/core";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import {
   Box,
   Typography,
@@ -13,8 +20,8 @@ import {
   IconButton,
   Chip,
   Tooltip,
-  Alert,
 } from "@mui/material";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Add,
   EmojiEvents,
@@ -29,71 +36,65 @@ import {
   Info,
 } from "@mui/icons-material";
 
-// Constants
-const GRID_SIZE = 20;
+// Grid size for snapping - much finer for smoother routing
+const GRID_SIZE = 5;
+
+// Utility functions
 const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
+
 const generateId = () =>
   `comp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// ============================================================================
-// DRAGGABLE TEAM COMPONENT
-// ============================================================================
-const DraggableTeam = ({ team }) => {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id: String(team?._id || team?.id || `team-${Math.random()}`),
-    });
-
-  const style = {
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
-    opacity: isDragging ? 0.5 : 1,
-    cursor: "grab",
-  };
-
+// Connection Point Component
+const ConnectionPoint = ({
+  type,
+  position,
+  componentId,
+  pointId,
+  isActive,
+  onClick,
+  color = "#3b82f6",
+}) => {
   return (
-    <Paper
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      sx={{
-        p: 1.5,
-        ...style,
-        backgroundColor: team.color || "#1976d2",
-        color: "white",
-        borderRadius: "8px",
-        textAlign: "center",
-        minHeight: "40px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-        border: "1px solid rgba(255,255,255,0.2)",
-        fontWeight: 500,
-        fontSize: "0.875rem",
+    <div
+      id={`connection-${componentId}-${pointId}`}
+      style={{
+        position: "absolute",
+        width: "14px",
+        height: "14px",
+        borderRadius: "50%",
+        backgroundColor: isActive ? color : "#374151",
+        border: `2px solid ${color}`,
+        cursor: "pointer",
+        zIndex: 20,
+        ...position,
+        transition: "all 0.2s",
+        transform: isActive ? "scale(1.3)" : "scale(1)",
+        boxShadow: isActive ? `0 0 8px ${color}` : "none",
       }}
-      elevation={2}
-    >
-      {team?.name || "Unnamed Team"}
-    </Paper>
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onClick) onClick(componentId, pointId, type);
+      }}
+    />
   );
 };
 
-// ============================================================================
-// TEAM SLOT COMPONENT (for matches/groups)
-// ============================================================================
+// Team Slot Component
 const TeamSlot = ({
   id,
-  team = null,
-  score = null,
-  onScoreChange = null,
-  showScore = false,
-  isWinner = false,
-  onTeamRemove = null,
-  size = "normal", // "normal" or "compact"
+  team,
+  score,
+  onScoreChange,
+  showScore,
+  isWinner,
+  disabled,
+  onTeamRemove,
 }) => {
-  const { isOver, setNodeRef } = useDroppable({ id: String(id || "") });
+  const { isOver, setNodeRef } = useDroppable({
+    id: String(id),
+    disabled: Boolean(disabled),
+  });
 
   return (
     <div
@@ -102,72 +103,75 @@ const TeamSlot = ({
         display: "flex",
         alignItems: "center",
         gap: "8px",
-        padding: size === "compact" ? "6px" : "10px",
+        padding: "8px",
         backgroundColor: isOver
-          ? "rgba(25, 118, 210, 0.2)"
-          : "rgba(255,255,255,0.08)",
+          ? "rgba(59, 130, 246, 0.2)"
+          : "rgba(71, 85, 105, 0.4)",
         borderRadius: "6px",
         border: isOver
-          ? "2px solid #1976d2"
-          : "1px solid rgba(255,255,255,0.12)",
-        minHeight: size === "compact" ? "32px" : "40px",
-        transition: "all 0.2s ease",
+          ? "2px solid #3b82f6"
+          : "2px solid rgba(148, 163, 184, 0.2)",
+        minHeight: "40px",
+        transition: "all 0.2s",
         position: "relative",
       }}
     >
       {/* Winner Trophy */}
-      {isWinner && <EmojiEvents sx={{ color: "#ffd700", fontSize: "18px" }} />}
+      {isWinner && <EmojiEvents sx={{ color: "gold", fontSize: "16px" }} />}
 
       {/* Team Name */}
       <div
         style={{
           flex: 1,
-          color: "#ffffff",
-          fontSize: size === "compact" ? "0.75rem" : "0.875rem",
+          color: "#e2e8f0",
+          fontSize: "0.875rem",
           fontWeight: "500",
-          cursor: team && onTeamRemove ? "pointer" : "default",
         }}
-        onClick={() => team && onTeamRemove && onTeamRemove()}
       >
-        {team ? (
-          team.name || "Unnamed Team"
+        {team && team.name ? (
+          <span
+            onClick={() => onTeamRemove && onTeamRemove()}
+            style={{ cursor: onTeamRemove ? "pointer" : "default" }}
+          >
+            {String(team.name)}
+          </span>
         ) : (
-          <span style={{ color: "#9ca3af", fontStyle: "italic" }}>
+          <span style={{ color: "#94a3b8", fontStyle: "italic" }}>
             {isOver ? "Drop team here" : "Empty slot"}
           </span>
         )}
       </div>
 
-      {/* Score Input */}
+      {/* Score Square */}
       {showScore && (
         <input
           type="number"
-          value={score != null ? score : ""}
-          onChange={(e) =>
-            onScoreChange && onScoreChange(parseInt(e.target.value) || 0)
-          }
-          style={{
-            width: "45px",
-            height: "30px",
-            backgroundColor: "rgba(0,0,0,0.4)",
-            border: "1px solid rgba(255,255,255,0.2)",
-            borderRadius: "4px",
-            color: "#ffffff",
-            textAlign: "center",
-            fontSize: "0.875rem",
-            fontWeight: "600",
+          value={score !== null && score !== undefined ? String(score) : ""}
+          onChange={(e) => {
+            const newScore =
+              e.target.value === "" ? 0 : parseInt(e.target.value) || 0;
+            if (onScoreChange) onScoreChange(newScore);
           }}
-          min="0"
+          style={{
+            width: "40px",
+            height: "28px",
+            backgroundColor: "rgba(30, 41, 59, 0.8)",
+            border: "1px solid rgba(148, 163, 184, 0.3)",
+            borderRadius: "4px",
+            color: "#e2e8f0",
+            textAlign: "center",
+            fontSize: "0.75rem",
+            fontWeight: "bold",
+          }}
+          disabled={disabled}
         />
       )}
     </div>
   );
 };
 
-// ============================================================================
-// MATCH COMPONENT
-// ============================================================================
-const MatchComponent = ({
+// Group Component
+const GroupComponent = ({
   id,
   position,
   data,
@@ -175,33 +179,29 @@ const MatchComponent = ({
   onDrag,
   onEdit,
   onDelete,
+  selectedForConnection,
+  onConnectionPoint,
   deleteMode,
   participants,
-  onConnectionPointClick,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  const handleMouseDown = useCallback(
-    (e) => {
-      if (deleteMode) return;
-      setIsDragging(true);
-      const rect = e.currentTarget.getBoundingClientRect();
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
-      e.preventDefault();
-    },
-    [deleteMode]
-  );
+  const handleMouseDown = (e) => {
+    if (deleteMode) return;
+    setIsDragging(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  };
 
   const handleMouseMove = useCallback(
     (e) => {
       if (!isDragging) return;
       const canvas = document.getElementById("bracket-canvas");
       if (!canvas) return;
-
       const canvasRect = canvas.getBoundingClientRect();
       const newX = snapToGrid(e.clientX - canvasRect.left - dragOffset.x);
       const newY = snapToGrid(e.clientY - canvasRect.top - dragOffset.y);
@@ -210,9 +210,7 @@ const MatchComponent = ({
     [isDragging, dragOffset, id, onDrag]
   );
 
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
+  const handleMouseUp = () => setIsDragging(false);
 
   useEffect(() => {
     if (isDragging) {
@@ -223,39 +221,44 @@ const MatchComponent = ({
         document.removeEventListener("mouseup", handleMouseUp);
       };
     }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+  }, [isDragging, handleMouseMove]);
 
-  const teamA = data?.teamA
-    ? participants.find(
-        (p) => String(p?._id || p?.id || "") === String(data.teamA)
-      )
-    : null;
-  const teamB = data?.teamB
-    ? participants.find(
-        (p) => String(p?._id || p?.id || "") === String(data.teamB)
-      )
-    : null;
-
-  const scoreA = Number(data?.scoreA) || 0;
-  const scoreB = Number(data?.scoreB) || 0;
-  const hasScores = data?.scoreA != null && data?.scoreB != null;
-  const winnerA = hasScores && scoreA > scoreB;
-  const winnerB = hasScores && scoreB > scoreA;
-
-  const handleScoreChange = (team, score) => {
-    const field = team === "A" ? "scoreA" : "scoreB";
-    onUpdate(id, { ...(data || {}), [field]: score });
+  const handleTeamDrop = (slotIndex, teamId) => {
+    const currentData = data || {};
+    const currentSlots = Array.isArray(currentData.slots)
+      ? [...currentData.slots]
+      : [];
+    // Ensure the array is large enough
+    while (currentSlots.length <= slotIndex) {
+      currentSlots.push(null);
+    }
+    currentSlots[slotIndex] = { teamId, score: 0 };
+    onUpdate(id, { ...currentData, slots: currentSlots });
   };
 
-  const handleTeamRemove = (team) => {
-    const teamField = team === "A" ? "teamA" : "teamB";
-    const scoreField = team === "A" ? "scoreA" : "scoreB";
-    onUpdate(id, {
-      ...(data || {}),
-      [teamField]: null,
-      [scoreField]: 0,
-    });
+  const handleTeamRemove = (slotIndex) => {
+    const currentData = data || {};
+    const currentSlots = Array.isArray(currentData.slots)
+      ? [...currentData.slots]
+      : [];
+    if (slotIndex < currentSlots.length) {
+      currentSlots[slotIndex] = null;
+      onUpdate(id, { ...currentData, slots: currentSlots });
+    }
   };
+
+  const handleScoreChange = (slotIndex, score) => {
+    const currentData = data || {};
+    const currentSlots = Array.isArray(currentData.slots)
+      ? [...currentData.slots]
+      : [];
+    if (slotIndex < currentSlots.length && currentSlots[slotIndex]) {
+      currentSlots[slotIndex] = { ...currentSlots[slotIndex], score };
+      onUpdate(id, { ...currentData, slots: currentSlots });
+    }
+  };
+
+  const currentData = data || {};
 
   return (
     <div
@@ -264,16 +267,20 @@ const MatchComponent = ({
         position: "absolute",
         left: position.x,
         top: position.y,
-        width: "260px",
+        width: "220px",
         backgroundColor: deleteMode
-          ? "rgba(244, 67, 54, 0.2)"
-          : "rgba(15, 23, 42, 0.95)",
-        border: deleteMode ? "2px solid #f44336" : "2px solid #334155",
+          ? "rgba(239, 68, 68, 0.2)"
+          : "rgba(30, 41, 59, 0.95)",
+        border: deleteMode
+          ? "2px solid #ef4444"
+          : selectedForConnection
+          ? "2px solid #3b82f6"
+          : "2px solid #475569",
         borderRadius: "12px",
         padding: "16px",
         cursor: deleteMode ? "pointer" : isDragging ? "grabbing" : "grab",
         backdropFilter: "blur(8px)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
         userSelect: "none",
       }}
       onMouseDown={handleMouseDown}
@@ -290,14 +297,16 @@ const MatchComponent = ({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "16px",
+          marginBottom: "12px",
         }}
       >
         <Typography
           variant="subtitle2"
           sx={{ color: "#e2e8f0", fontWeight: "600" }}
         >
-          {data?.name || `Match ${id.slice(-4)}`}
+          {currentData && currentData.name
+            ? String(currentData.name)
+            : `Group ${id.slice(-4)}`}
         </Typography>
         <IconButton
           size="small"
@@ -305,9 +314,406 @@ const MatchComponent = ({
             e.stopPropagation();
             onEdit(id);
           }}
-          sx={{ color: "#94a3b8" }}
         >
-          <Edit sx={{ fontSize: "16px" }} />
+          <Edit sx={{ fontSize: "16px", color: "#94a3b8" }} />
+        </IconButton>
+      </div>
+
+      {/* Slots */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        {Array.from(
+          {
+            length:
+              currentData && typeof currentData.slotCount === "number"
+                ? currentData.slotCount
+                : 4,
+          },
+          (_, i) => {
+            const slots = Array.isArray(currentData.slots)
+              ? currentData.slots
+              : [];
+            const slot = slots[i] || null;
+            const team =
+              slot && slot.teamId
+                ? participants.find(
+                    (p) => String(p._id || p.id) === String(slot.teamId)
+                  )
+                : null;
+            return (
+              <TeamSlot
+                key={i}
+                id={`${id}-slot-${i}`}
+                team={team}
+                score={slot ? slot.score : null}
+                showScore={true}
+                isWinner={false}
+                disabled={false}
+                onScoreChange={(score) => handleScoreChange(i, score)}
+                onTeamRemove={() => handleTeamRemove(i)}
+              />
+            );
+          }
+        )}
+      </div>
+
+      {/* Connection Points */}
+      <ConnectionPoint
+        type="output"
+        position={{ right: "-7px", top: "30%" }}
+        componentId={id}
+        pointId="out"
+        isActive={selectedForConnection === `${id}-out`}
+        onClick={onConnectionPoint}
+        color="#4ade80"
+      />
+      <ConnectionPoint
+        type="input"
+        position={{ left: "-7px", top: "50%" }}
+        componentId={id}
+        pointId="in"
+        isActive={selectedForConnection === `${id}-in`}
+        onClick={onConnectionPoint}
+        color="#3b82f6"
+      />
+      <ConnectionPoint
+        type="bottom"
+        position={{
+          left: "50%",
+          bottom: "-7px",
+          transform: "translateX(-50%)",
+        }}
+        componentId={id}
+        pointId="bottom"
+        isActive={selectedForConnection === `${id}-bottom`}
+        onClick={onConnectionPoint}
+        color="#ef4444"
+      />
+    </div>
+  );
+};
+
+// Slot Component (single qualified team slot)
+const SlotComponent = ({
+  id,
+  position,
+  data,
+  onUpdate,
+  onDrag,
+  onEdit,
+  onDelete,
+  selectedForConnection,
+  onConnectionPoint,
+  deleteMode,
+  participants,
+}) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  const handleMouseDown = (e) => {
+    if (deleteMode) return;
+    setIsDragging(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  };
+
+  const handleMouseMove = useCallback(
+    (e) => {
+      if (!isDragging) return;
+      const canvas = document.getElementById("bracket-canvas");
+      if (!canvas) return;
+      const canvasRect = canvas.getBoundingClientRect();
+      const newX = snapToGrid(e.clientX - canvasRect.left - dragOffset.x);
+      const newY = snapToGrid(e.clientY - canvasRect.top - dragOffset.y);
+      onDrag(id, { x: newX, y: newY });
+    },
+    [isDragging, dragOffset, id, onDrag]
+  );
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [isDragging, handleMouseMove]);
+
+  const handleTeamRemove = () => {
+    const currentData = data || {};
+    onUpdate(id, { ...currentData, teamId: null });
+  };
+
+  const currentData = data || {};
+  const team = currentData.teamId
+    ? participants.find(
+        (p) => String(p._id || p.id) === String(currentData.teamId)
+      )
+    : null;
+
+  return (
+    <div
+      id={`component-${id}`}
+      style={{
+        position: "absolute",
+        left: position.x,
+        top: position.y,
+        width: "180px",
+        backgroundColor: deleteMode
+          ? "rgba(239, 68, 68, 0.2)"
+          : "rgba(30, 41, 59, 0.95)",
+        border: deleteMode
+          ? "2px solid #ef4444"
+          : selectedForConnection
+          ? "2px solid #3b82f6"
+          : "2px solid #475569",
+        borderRadius: "12px",
+        padding: "16px",
+        cursor: deleteMode ? "pointer" : isDragging ? "grabbing" : "grab",
+        backdropFilter: "blur(8px)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        userSelect: "none",
+      }}
+      onMouseDown={handleMouseDown}
+      onClick={(e) => {
+        if (deleteMode) {
+          e.stopPropagation();
+          onDelete(id);
+        }
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "12px",
+        }}
+      >
+        <Typography
+          variant="subtitle2"
+          sx={{ color: "#e2e8f0", fontWeight: "600" }}
+        >
+          {currentData && currentData.name
+            ? String(currentData.name)
+            : `Slot ${id.slice(-4)}`}
+        </Typography>
+        <IconButton
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(id);
+          }}
+        >
+          <Edit sx={{ fontSize: "16px", color: "#94a3b8" }} />
+        </IconButton>
+      </div>
+
+      {/* Single Team Slot */}
+      <TeamSlot
+        id={`${id}-slot`}
+        team={team}
+        score={null}
+        showScore={false}
+        isWinner={false}
+        disabled={false}
+        onScoreChange={null}
+        onTeamRemove={handleTeamRemove}
+      />
+
+      {/* Connection Points */}
+      <ConnectionPoint
+        type="output"
+        position={{ right: "-7px", top: "30%" }}
+        componentId={id}
+        pointId="out"
+        isActive={selectedForConnection === `${id}-out`}
+        onClick={onConnectionPoint}
+        color="#4ade80"
+      />
+      <ConnectionPoint
+        type="input"
+        position={{ left: "-7px", top: "50%" }}
+        componentId={id}
+        pointId="in"
+        isActive={selectedForConnection === `${id}-in`}
+        onClick={onConnectionPoint}
+        color="#3b82f6"
+      />
+      <ConnectionPoint
+        type="bottom"
+        position={{
+          left: "50%",
+          bottom: "-7px",
+          transform: "translateX(-50%)",
+        }}
+        componentId={id}
+        pointId="bottom"
+        isActive={selectedForConnection === `${id}-bottom`}
+        onClick={onConnectionPoint}
+        color="#ef4444"
+      />
+    </div>
+  );
+};
+
+// Match Component
+const MatchComponent = ({
+  id,
+  position,
+  data,
+  onUpdate,
+  onDrag,
+  onEdit,
+  onDelete,
+  selectedForConnection,
+  onConnectionPoint,
+  deleteMode,
+  participants,
+}) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+  const handleMouseDown = (e) => {
+    if (deleteMode) return;
+    setIsDragging(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  };
+
+  const handleMouseMove = useCallback(
+    (e) => {
+      if (!isDragging) return;
+      const canvas = document.getElementById("bracket-canvas");
+      if (!canvas) return;
+      const canvasRect = canvas.getBoundingClientRect();
+      const newX = snapToGrid(e.clientX - canvasRect.left - dragOffset.x);
+      const newY = snapToGrid(e.clientY - canvasRect.top - dragOffset.y);
+      onDrag(id, { x: newX, y: newY });
+    },
+    [isDragging, dragOffset, id, onDrag]
+  );
+
+  const handleMouseUp = () => setIsDragging(false);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [isDragging, handleMouseMove]);
+
+  const handleTeamRemove = (slot) => {
+    const currentData = data || {};
+    onUpdate(id, {
+      ...currentData,
+      [slot === "A" ? "teamA" : "teamB"]: null,
+      [slot === "A" ? "scoreA" : "scoreB"]: 0,
+    });
+  };
+
+  const handleScoreChange = (slot, score) => {
+    const currentData = data || {};
+    const newData = {
+      ...currentData,
+      [slot === "A" ? "scoreA" : "scoreB"]: score,
+    };
+    onUpdate(id, newData);
+  };
+
+  const currentData = data || {};
+  const teamA = currentData.teamA
+    ? participants.find(
+        (p) => String(p._id || p.id) === String(currentData.teamA)
+      )
+    : null;
+  const teamB = currentData.teamB
+    ? participants.find(
+        (p) => String(p._id || p.id) === String(currentData.teamB)
+      )
+    : null;
+
+  // Determine winner
+  const scoreA = Number(currentData.scoreA) || 0;
+  const scoreB = Number(currentData.scoreB) || 0;
+  const hasScores =
+    currentData.scoreA !== undefined &&
+    currentData.scoreA !== null &&
+    currentData.scoreB !== undefined &&
+    currentData.scoreB !== null;
+  const winnerA = hasScores && scoreA > scoreB;
+  const winnerB = hasScores && scoreB > scoreA;
+
+  return (
+    <div
+      id={`component-${id}`}
+      style={{
+        position: "absolute",
+        left: position.x,
+        top: position.y,
+        width: "220px",
+        backgroundColor: deleteMode
+          ? "rgba(239, 68, 68, 0.2)"
+          : "rgba(30, 41, 59, 0.95)",
+        border: deleteMode
+          ? "2px solid #ef4444"
+          : selectedForConnection
+          ? "2px solid #3b82f6"
+          : "2px solid #475569",
+        borderRadius: "12px",
+        padding: "16px",
+        cursor: deleteMode ? "pointer" : isDragging ? "grabbing" : "grab",
+        backdropFilter: "blur(8px)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        userSelect: "none",
+      }}
+      onMouseDown={handleMouseDown}
+      onClick={(e) => {
+        if (deleteMode) {
+          e.stopPropagation();
+          onDelete(id);
+        }
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "12px",
+        }}
+      >
+        <Typography
+          variant="subtitle2"
+          sx={{ color: "#e2e8f0", fontWeight: "600" }}
+        >
+          {currentData && currentData.name
+            ? String(currentData.name)
+            : `Match ${id.slice(-4)}`}
+        </Typography>
+        <IconButton
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(id);
+          }}
+        >
+          <Edit sx={{ fontSize: "16px", color: "#94a3b8" }} />
         </IconButton>
       </div>
 
@@ -319,446 +725,350 @@ const MatchComponent = ({
           score={scoreA}
           showScore={true}
           isWinner={winnerA}
+          disabled={false}
           onScoreChange={(score) => handleScoreChange("A", score)}
           onTeamRemove={() => handleTeamRemove("A")}
         />
       </div>
 
-      {/* VS Divider */}
+      {/* VS */}
       <div
         style={{
           textAlign: "center",
-          margin: "12px 0",
+          margin: "8px 0",
           color: "#64748b",
           fontSize: "0.75rem",
           fontWeight: "bold",
-          letterSpacing: "1px",
         }}
       >
         VS
       </div>
 
       {/* Team B */}
-      <div style={{ marginBottom: "16px" }}>
-        <TeamSlot
-          id={`${id}-teamB`}
-          team={teamB}
-          score={scoreB}
-          showScore={true}
-          isWinner={winnerB}
-          onScoreChange={(score) => handleScoreChange("B", score)}
-          onTeamRemove={() => handleTeamRemove("B")}
-        />
-      </div>
+      <TeamSlot
+        id={`${id}-teamB`}
+        team={teamB}
+        score={scoreB}
+        showScore={true}
+        isWinner={winnerB}
+        disabled={false}
+        onScoreChange={(score) => handleScoreChange("B", score)}
+        onTeamRemove={() => handleTeamRemove("B")}
+      />
 
       {/* Connection Points */}
-      <div
-        className="connection-point winner"
-        style={{
-          position: "absolute",
-          right: "-8px",
-          top: "50%",
-          transform: "translateY(-50%)",
-          width: "16px",
-          height: "16px",
-          borderRadius: "50%",
-          backgroundColor: "#4caf50",
-          border: "2px solid #ffffff",
-          cursor: "pointer",
-          zIndex: 10,
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onConnectionPointClick &&
-            onConnectionPointClick(id, "winner", "output");
-        }}
+      <ConnectionPoint
+        type="winner"
+        position={{ right: "-7px", top: "30%" }}
+        componentId={id}
+        pointId="winner"
+        isActive={selectedForConnection === `${id}-winner`}
+        onClick={onConnectionPoint}
+        color="#4ade80"
       />
-
-      <div
-        className="connection-point loser"
-        style={{
-          position: "absolute",
+      <ConnectionPoint
+        type="loser"
+        position={{
           left: "50%",
-          bottom: "-8px",
+          bottom: "-7px",
           transform: "translateX(-50%)",
-          width: "16px",
-          height: "16px",
-          borderRadius: "50%",
-          backgroundColor: "#f44336",
-          border: "2px solid #ffffff",
-          cursor: "pointer",
-          zIndex: 10,
         }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onConnectionPointClick &&
-            onConnectionPointClick(id, "loser", "output");
-        }}
+        componentId={id}
+        pointId="loser"
+        isActive={selectedForConnection === `${id}-loser`}
+        onClick={onConnectionPoint}
+        color="#ef4444"
+      />
+      <ConnectionPoint
+        type="input"
+        position={{ left: "-7px", top: "30%" }}
+        componentId={id}
+        pointId="inA"
+        isActive={selectedForConnection === `${id}-inA`}
+        onClick={onConnectionPoint}
+        color="#3b82f6"
+      />
+      <ConnectionPoint
+        type="input"
+        position={{ left: "-7px", top: "70%" }}
+        componentId={id}
+        pointId="inB"
+        isActive={selectedForConnection === `${id}-inB`}
+        onClick={onConnectionPoint}
+        color="#3b82f6"
       />
     </div>
   );
 };
 
-// ============================================================================
-// GROUP COMPONENT
-// ============================================================================
-const GroupComponent = ({
-  id,
-  position,
-  data,
-  onUpdate,
-  onDrag,
-  onEdit,
-  onDelete,
-  deleteMode,
-  participants,
-  onConnectionPointClick,
-}) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+// Connection Line Component with debugging and improved calculations
+const ConnectionLine = ({ connection, components, onDelete, deleteMode }) => {
+  const fromComp = components.find((c) => c.id === connection.from.componentId);
+  const toComp = components.find((c) => c.id === connection.to.componentId);
 
-  const handleMouseDown = useCallback(
-    (e) => {
-      if (deleteMode) return;
-      setIsDragging(true);
-      const rect = e.currentTarget.getBoundingClientRect();
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
-      e.preventDefault();
-    },
-    [deleteMode]
-  );
+  if (!fromComp || !toComp) return null;
 
-  const handleMouseMove = useCallback(
-    (e) => {
-      if (!isDragging) return;
+  const getConnectionPoint = (comp, pointId) => {
+    const { position } = comp;
+
+    // Try to get the actual connection point element position
+    const connectionPointId = `connection-${comp.id}-${pointId}`;
+    const connectionElement = document.getElementById(connectionPointId);
+
+    if (connectionElement) {
+      const rect = connectionElement.getBoundingClientRect();
       const canvas = document.getElementById("bracket-canvas");
-      if (!canvas) return;
+      const canvasRect = canvas
+        ? canvas.getBoundingClientRect()
+        : { left: 0, top: 0 };
 
-      const canvasRect = canvas.getBoundingClientRect();
-      const newX = snapToGrid(e.clientX - canvasRect.left - dragOffset.x);
-      const newY = snapToGrid(e.clientY - canvasRect.top - dragOffset.y);
-      onDrag(id, { x: newX, y: newY });
-    },
-    [isDragging, dragOffset, id, onDrag]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
+      // Return the center of the actual connection point element
+      return {
+        x: rect.left - canvasRect.left + rect.width / 2,
+        y: rect.top - canvasRect.top + rect.height / 2,
       };
     }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  const slotCount = data?.slotCount || 4;
-  const slots = data?.slots || [];
+    // Fallback to calculated positions if element not found
+    const width = comp.type === "slot" ? 180 : 220;
+    let height;
 
-  const handleTeamDrop = (slotIndex, teamId) => {
-    const newSlots = [...slots];
-    while (newSlots.length <= slotIndex) {
-      newSlots.push(null);
+    if (comp.type === "group") {
+      const slotCount =
+        comp.data && typeof comp.data.slotCount === "number"
+          ? comp.data.slotCount
+          : 4;
+      height = 72 + slotCount * 48;
+    } else if (comp.type === "match") {
+      height = 144;
+    } else if (comp.type === "slot") {
+      height = 96;
+    } else {
+      height = 130;
     }
-    newSlots[slotIndex] = { teamId, score: 0 };
-    onUpdate(id, { ...(data || {}), slots: newSlots });
+
+    // Fallback calculations
+    switch (pointId) {
+      case "out":
+      case "winner":
+        return { x: position.x + width + 7, y: position.y + height * 0.3 + 7 };
+      case "loser":
+        return { x: position.x + width + 7, y: position.y + height * 0.7 + 7 };
+      case "in":
+        return { x: position.x - 7, y: position.y + height * 0.5 + 7 };
+      case "inA":
+        return { x: position.x - 7, y: position.y + height * 0.3 + 7 };
+      case "inB":
+        return { x: position.x - 7, y: position.y + height * 0.7 + 7 };
+      case "bottom":
+        return { x: position.x + width / 2, y: position.y + height + 7 };
+      default:
+        return { x: position.x + width / 2, y: position.y + height / 2 };
+    }
   };
 
-  const handleTeamRemove = (slotIndex) => {
-    const newSlots = [...slots];
-    if (slotIndex < newSlots.length) {
-      newSlots[slotIndex] = null;
-      onUpdate(id, { ...(data || {}), slots: newSlots });
+  const fromPoint = getConnectionPoint(fromComp, connection.from.pointId);
+  const toPoint = getConnectionPoint(toComp, connection.to.pointId);
+
+  // Create grid-snapped path with minimal turns
+  const createOptimalPath = (from, to) => {
+    // Don't snap the start and end points to grid to ensure precise connection to dots
+    const startX = from.x;
+    const startY = from.y;
+    const endX = to.x;
+    const endY = to.y;
+
+    // Consistent routing distance for all directions
+    const routeDistance = 30;
+
+    // Check connection types
+    const isFromBottom =
+      connection.from.pointId === "loser" ||
+      connection.from.pointId === "bottom";
+    const isFromGreen =
+      connection.from.pointId === "winner" || connection.from.pointId === "out";
+    const isToBlueInput =
+      connection.to.pointId === "in" ||
+      connection.to.pointId === "inA" ||
+      connection.to.pointId === "inB";
+
+    // Check height difference for green connections
+    const heightDifference = Math.abs(startY - endY);
+
+    if (isFromGreen && heightDifference > 10) {
+      // Green connections with height difference: H-shaped routing
+      const midY = snapToGrid((startY + endY) / 2); // Perfect middle point
+      const midX1 = snapToGrid(startX + routeDistance); // Go right from green dot
+      const midX2 = snapToGrid(endX - routeDistance); // Approach destination from left
+      const path = `M ${startX} ${startY} L ${midX1} ${startY} L ${midX1} ${midY} L ${midX2} ${midY} L ${midX2} ${endY} L ${endX} ${endY}`;
+      return path;
+    } else if (isFromBottom && isToBlueInput) {
+      // Red dot going to blue input: down first, then approach from side
+      const midY = snapToGrid(startY + routeDistance); // Go down first
+      const approachX = snapToGrid(endX - routeDistance); // Approach from side
+      const path = `M ${startX} ${startY} L ${startX} ${midY} L ${approachX} ${midY} L ${approachX} ${endY} L ${endX} ${endY}`;
+      return path;
+    } else if (isFromBottom) {
+      // Red dot going to other types: simple down then across
+      const midY = snapToGrid(startY + routeDistance);
+      const path = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+      return path;
+    } else {
+      // Side connections: approach destination from side
+      const midX = snapToGrid(startX + routeDistance);
+      const approachX = snapToGrid(endX - routeDistance);
+      const path = `M ${startX} ${startY} L ${midX} ${startY} L ${approachX} ${startY} L ${approachX} ${endY} L ${endX} ${endY}`;
+      return path;
     }
   };
 
-  const handleScoreChange = (slotIndex, score) => {
-    const newSlots = [...slots];
-    if (slotIndex < newSlots.length && newSlots[slotIndex]) {
-      newSlots[slotIndex] = { ...newSlots[slotIndex], score };
-      onUpdate(id, { ...(data || {}), slots: newSlots });
-    }
+  const colors = {
+    winner: "#4ade80",
+    loser: "#ef4444",
+    normal: "#3b82f6",
+  };
+
+  const color = deleteMode ? "#ef4444" : colors[connection.type];
+  const pathData = createOptimalPath(fromPoint, toPoint);
+
+  return (
+    <svg
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        zIndex: 1,
+      }}
+    >
+      {/* Main connection path with individual click handling */}
+      <path
+        d={pathData}
+        stroke={color}
+        strokeWidth={deleteMode ? 4 : 3}
+        strokeDasharray={connection.type === "loser" ? "8,4" : "none"}
+        fill="none"
+        style={{
+          cursor: deleteMode ? "pointer" : "default",
+          pointerEvents: deleteMode ? "stroke" : "none",
+        }}
+        onClick={(e) => {
+          if (deleteMode) {
+            e.stopPropagation();
+            onDelete(connection.id);
+          }
+        }}
+      />
+
+      {/* Arrow at end */}
+      <polygon
+        points={`${toPoint.x - 8},${toPoint.y - 4} ${toPoint.x},${toPoint.y} ${
+          toPoint.x - 8
+        },${toPoint.y + 4}`}
+        fill={color}
+        style={{
+          cursor: deleteMode ? "pointer" : "default",
+          pointerEvents: deleteMode ? "fill" : "none",
+        }}
+        onClick={(e) => {
+          if (deleteMode) {
+            e.stopPropagation();
+            onDelete(connection.id);
+          }
+        }}
+      />
+
+      {/* Invisible wider click area for easier deletion */}
+      {deleteMode && (
+        <path
+          d={pathData}
+          stroke="transparent"
+          strokeWidth="12"
+          fill="none"
+          style={{
+            cursor: "pointer",
+            pointerEvents: "stroke",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(connection.id);
+          }}
+        />
+      )}
+
+      {/* Debug circles to show calculated connection points */}
+      {process.env.NODE_ENV === "development" && (
+        <>
+          <circle
+            cx={fromPoint.x}
+            cy={fromPoint.y}
+            r="3"
+            fill="red"
+            opacity="0.7"
+          />
+          <circle
+            cx={toPoint.x}
+            cy={toPoint.y}
+            r="3"
+            fill="blue"
+            opacity="0.7"
+          />
+        </>
+      )}
+    </svg>
+  );
+};
+
+// Draggable Team
+const DraggableTeam = ({ team }) => {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: String(team._id || team.id || `team-${Math.random()}`),
+    });
+
+  const style = {
+    transform: transform
+      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+      : undefined,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: "grab",
+    width: "100%",
   };
 
   return (
-    <div
-      id={`component-${id}`}
-      style={{
-        position: "absolute",
-        left: position.x,
-        top: position.y,
-        width: "240px",
-        backgroundColor: deleteMode
-          ? "rgba(244, 67, 54, 0.2)"
-          : "rgba(15, 23, 42, 0.95)",
-        border: deleteMode ? "2px solid #f44336" : "2px solid #334155",
-        borderRadius: "12px",
-        padding: "16px",
-        cursor: deleteMode ? "pointer" : isDragging ? "grabbing" : "grab",
-        backdropFilter: "blur(8px)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-        userSelect: "none",
+    <Paper
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      sx={{
+        p: 1.5,
+        ...style,
+        backgroundColor: team.color || "#424242",
+        color: "white",
+        borderRadius: "6px",
+        textOverflow: "ellipsis",
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        minHeight: "40px",
+        display: "flex",
+        alignItems: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+        border: "1px solid rgba(255,255,255,0.1)",
       }}
-      onMouseDown={handleMouseDown}
-      onClick={(e) => {
-        if (deleteMode) {
-          e.stopPropagation();
-          onDelete(id);
-        }
-      }}
+      elevation={2}
     >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "16px",
-        }}
-      >
-        <Typography
-          variant="subtitle2"
-          sx={{ color: "#e2e8f0", fontWeight: "600" }}
-        >
-          {data?.name || `Group ${id.slice(-4)}`}
-        </Typography>
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(id);
-          }}
-          sx={{ color: "#94a3b8" }}
-        >
-          <Edit sx={{ fontSize: "16px" }} />
-        </IconButton>
-      </div>
-
-      {/* Team Slots */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        {Array.from({ length: slotCount }, (_, i) => {
-          const slot = slots[i];
-          const team = slot?.teamId
-            ? participants.find(
-                (p) => String(p?._id || p?.id || "") === String(slot.teamId)
-              )
-            : null;
-          return (
-            <TeamSlot
-              key={i}
-              id={`${id}-slot-${i}`}
-              team={team}
-              score={slot?.score || null}
-              showScore={true}
-              isWinner={false}
-              onScoreChange={(score) => handleScoreChange(i, score)}
-              onTeamRemove={() => handleTeamRemove(i)}
-              size="compact"
-            />
-          );
-        })}
-      </div>
-
-      {/* Connection Point */}
-      <div
-        className="connection-point output"
-        style={{
-          position: "absolute",
-          right: "-8px",
-          top: "50%",
-          transform: "translateY(-50%)",
-          width: "16px",
-          height: "16px",
-          borderRadius: "50%",
-          backgroundColor: "#2196f3",
-          border: "2px solid #ffffff",
-          cursor: "pointer",
-          zIndex: 10,
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onConnectionPointClick &&
-            onConnectionPointClick(id, "output", "output");
-        }}
-      />
-    </div>
+      {team && team.name ? String(team.name) : "Unnamed Team"}
+    </Paper>
   );
 };
 
-// ============================================================================
-// SLOT COMPONENT (Single team qualifier)
-// ============================================================================
-const SlotComponent = ({
-  id,
-  position,
-  data,
-  onUpdate,
-  onDrag,
-  onEdit,
-  onDelete,
-  deleteMode,
-  participants,
-  onConnectionPointClick,
-}) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-  const handleMouseDown = useCallback(
-    (e) => {
-      if (deleteMode) return;
-      setIsDragging(true);
-      const rect = e.currentTarget.getBoundingClientRect();
-      setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      });
-      e.preventDefault();
-    },
-    [deleteMode]
-  );
-
-  const handleMouseMove = useCallback(
-    (e) => {
-      if (!isDragging) return;
-      const canvas = document.getElementById("bracket-canvas");
-      if (!canvas) return;
-
-      const canvasRect = canvas.getBoundingClientRect();
-      const newX = snapToGrid(e.clientX - canvasRect.left - dragOffset.x);
-      const newY = snapToGrid(e.clientY - canvasRect.top - dragOffset.y);
-      onDrag(id, { x: newX, y: newY });
-    },
-    [isDragging, dragOffset, id, onDrag]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-    }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
-
-  const team = data?.teamId
-    ? participants.find(
-        (p) => String(p?._id || p?.id || "") === String(data.teamId)
-      )
-    : null;
-
-  const handleTeamRemove = () => {
-    onUpdate(id, { ...(data || {}), teamId: null });
-  };
-
-  return (
-    <div
-      id={`component-${id}`}
-      style={{
-        position: "absolute",
-        left: position.x,
-        top: position.y,
-        width: "200px",
-        backgroundColor: deleteMode
-          ? "rgba(244, 67, 54, 0.2)"
-          : "rgba(15, 23, 42, 0.95)",
-        border: deleteMode ? "2px solid #f44336" : "2px solid #334155",
-        borderRadius: "12px",
-        padding: "16px",
-        cursor: deleteMode ? "pointer" : isDragging ? "grabbing" : "grab",
-        backdropFilter: "blur(8px)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-        userSelect: "none",
-      }}
-      onMouseDown={handleMouseDown}
-      onClick={(e) => {
-        if (deleteMode) {
-          e.stopPropagation();
-          onDelete(id);
-        }
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "16px",
-        }}
-      >
-        <Typography
-          variant="subtitle2"
-          sx={{ color: "#e2e8f0", fontWeight: "600" }}
-        >
-          {data?.name || `Slot ${id.slice(-4)}`}
-        </Typography>
-        <IconButton
-          size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(id);
-          }}
-          sx={{ color: "#94a3b8" }}
-        >
-          <Edit sx={{ fontSize: "16px" }} />
-        </IconButton>
-      </div>
-
-      {/* Single Team Slot */}
-      <TeamSlot
-        id={`${id}-slot`}
-        team={team}
-        showScore={false}
-        onTeamRemove={handleTeamRemove}
-      />
-
-      {/* Connection Point */}
-      <div
-        className="connection-point output"
-        style={{
-          position: "absolute",
-          right: "-8px",
-          top: "50%",
-          transform: "translateY(-50%)",
-          width: "16px",
-          height: "16px",
-          borderRadius: "50%",
-          backgroundColor: "#2196f3",
-          border: "2px solid #ffffff",
-          cursor: "pointer",
-          zIndex: 10,
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onConnectionPointClick &&
-            onConnectionPointClick(id, "output", "output");
-        }}
-      />
-    </div>
-  );
-};
-
-// ============================================================================
-// STATE MANAGEMENT
-// ============================================================================
+// Component state management
 const componentsReducer = (state, action) => {
   switch (action.type) {
     case "SET_COMPONENTS":
-      return Array.isArray(action.payload) ? action.payload : [];
+      return action.payload;
     case "ADD_COMPONENT":
       return [...state, action.payload];
     case "DELETE_COMPONENT":
@@ -776,10 +1086,21 @@ const componentsReducer = (state, action) => {
   }
 };
 
-// ============================================================================
-// EDIT DIALOGS
-// ============================================================================
-const EditDialog = ({ open, onClose, data, onSave, type }) => {
+const connectionsReducer = (state, action) => {
+  switch (action.type) {
+    case "SET_CONNECTIONS":
+      return action.payload;
+    case "ADD_CONNECTION":
+      return [...state, action.payload];
+    case "DELETE_CONNECTION":
+      return state.filter((conn) => conn.id !== action.id);
+    default:
+      return state;
+  }
+};
+
+// Edit Dialogs
+const EditGroupDialog = ({ open, onClose, data, onSave }) => {
   const [name, setName] = useState("");
   const [slotCount, setSlotCount] = useState(4);
 
@@ -787,51 +1108,36 @@ const EditDialog = ({ open, onClose, data, onSave, type }) => {
     if (open && data) {
       setName(data.name || "");
       setSlotCount(data.slotCount || 4);
-    } else if (open) {
-      setName("");
-      setSlotCount(4);
     }
   }, [open, data]);
 
   const handleSave = () => {
-    if (type === "group") {
-      onSave({ name, slotCount });
-    } else {
-      onSave({ name });
-    }
+    onSave({ name, slotCount });
     onClose();
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        Edit {type === "group" ? "Group" : type === "match" ? "Match" : "Slot"}
-      </DialogTitle>
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Edit Group</DialogTitle>
       <DialogContent>
         <TextField
-          label={`${
-            type === "group" ? "Group" : type === "match" ? "Match" : "Slot"
-          } Name`}
+          label="Group Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           fullWidth
           margin="normal"
-          variant="outlined"
         />
-        {type === "group" && (
-          <TextField
-            label="Number of Slots"
-            type="number"
-            value={slotCount}
-            onChange={(e) =>
-              setSlotCount(Math.max(1, parseInt(e.target.value) || 1))
-            }
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            inputProps={{ min: 1, max: 16 }}
-          />
-        )}
+        <TextField
+          label="Number of Slots"
+          type="number"
+          value={slotCount}
+          onChange={(e) =>
+            setSlotCount(Math.max(1, parseInt(e.target.value) || 1))
+          }
+          fullWidth
+          margin="normal"
+          inputProps={{ min: 1, max: 16 }}
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
@@ -843,39 +1149,117 @@ const EditDialog = ({ open, onClose, data, onSave, type }) => {
   );
 };
 
-// ============================================================================
-// MAIN BRACKET COMPONENT
-// ============================================================================
+const EditSlotDialog = ({ open, onClose, data, onSave }) => {
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    if (open && data) {
+      setName(data.name || "");
+    }
+  }, [open, data]);
+
+  const handleSave = () => {
+    onSave({ name });
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Edit Slot</DialogTitle>
+      <DialogContent>
+        <TextField
+          label="Slot Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          fullWidth
+          margin="normal"
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} variant="contained">
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const EditMatchDialog = ({ open, onClose, data, onSave }) => {
+  const [name, setName] = useState("");
+
+  useEffect(() => {
+    if (open && data) {
+      setName(data.name || "");
+    }
+  }, [open, data]);
+
+  const handleSave = () => {
+    onSave({ name });
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>Edit Match</DialogTitle>
+      <DialogContent>
+        <TextField
+          label="Match Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          fullWidth
+          margin="normal"
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={handleSave} variant="contained">
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+// Main Bracket Component
 const Bracket = ({
+  phases = [],
+  matchesByPhase = [],
   participants = [],
+  onBracketUpdate = async () => {},
   organizerMode = false,
   tournament = {},
-  onBracketUpdate,
-  phases = [], // ✅ Add phases prop
-  matchesByPhase = [], // ✅ Add matchesByPhase prop
 }) => {
-  // State
+  const navigate = useNavigate();
   const [components, dispatchComponents] = useReducer(componentsReducer, []);
+  const [connections, dispatchConnections] = useReducer(connectionsReducer, []);
+
+  // UI States
+  const [connectionMode, setConnectionMode] = useState(null); // 'winner', 'loser', 'normal'
+  const [selectedConnection, setSelectedConnection] = useState(null);
   const [deleteMode, setDeleteMode] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+
+  // Edit dialogs
   const [editingComponent, setEditingComponent] = useState(null);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState({
+    group: false,
+    slot: false,
+    match: false,
+  });
+
+  // History for undo/redo
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-
-  // Canvas panning
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [panStartOffset, setPanStartOffset] = useState({ x: 0, y: 0 });
 
   // Get unplaced teams
   const getUnplacedTeams = () => {
     const placedTeamIds = new Set();
     components.forEach((comp) => {
-      if (comp.type === "group" && comp.data.slots) {
+      if (comp.type === "group" && Array.isArray(comp.data.slots)) {
         comp.data.slots.forEach((slot) => {
-          if (slot?.teamId) placedTeamIds.add(String(slot.teamId));
+          if (slot && slot.teamId) placedTeamIds.add(String(slot.teamId));
         });
       } else if (comp.type === "slot" && comp.data.teamId) {
         placedTeamIds.add(String(comp.data.teamId));
@@ -885,65 +1269,82 @@ const Bracket = ({
       }
     });
     return participants.filter(
-      (team) => !placedTeamIds.has(String(team?._id || team?.id || ""))
+      (team) => !placedTeamIds.has(String(team._id || team.id))
     );
   };
 
-  // History management
+  // Save state to history
   const saveToHistory = () => {
-    const state = { components };
+    const state = { components, connections };
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(state);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
   };
 
-  // Load/save from localStorage
+  // Load initial state or from localStorage
   useEffect(() => {
-    const tournamentId =
-      tournament && "_id" in tournament ? tournament._id : "default";
+    const id =
+      tournament && "_id" in tournament ? String(tournament._id).trim() : "";
+    const tournamentId = id || "default";
     const saved = localStorage.getItem(`bracket-${tournamentId}`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.components && Array.isArray(parsed.components)) {
-          dispatchComponents({
-            type: "SET_COMPONENTS",
-            payload: parsed.components,
-          });
-        }
+        const savedComponents = Array.isArray(parsed.components)
+          ? parsed.components
+          : [];
+        const savedConnections = Array.isArray(parsed.connections)
+          ? parsed.connections
+          : [];
+        dispatchComponents({
+          type: "SET_COMPONENTS",
+          payload: savedComponents,
+        });
+        dispatchConnections({
+          type: "SET_CONNECTIONS",
+          payload: savedConnections,
+        });
       } catch (e) {
         console.error("Error loading saved bracket:", e);
       }
     }
   }, [tournament]);
 
+  // Save to localStorage whenever state changes
   useEffect(() => {
     const tournamentId =
-      tournament && "_id" in tournament ? tournament._id : "default";
+      tournament && typeof tournament === "object" && "_id" in tournament
+        ? String(tournament._id)
+        : "default";
     localStorage.setItem(
       `bracket-${tournamentId}`,
-      JSON.stringify({ components })
+      JSON.stringify({
+        components: Array.isArray(components) ? components : [],
+        connections: Array.isArray(connections) ? connections : [],
+      })
     );
-  }, [components, tournament]);
+  }, [components, connections, tournament]);
 
   // Component handlers
   const handleAddComponent = (type) => {
     const id = generateId();
-    const centerX = 300 - panOffset.x;
-    const centerY = 200 - panOffset.y;
+    // Place new components in the center of the current view
+    const centerX = 400 - panOffset.x;
+    const centerY = 300 - panOffset.y;
 
     const newComponent = {
       id,
       type,
       position: { x: snapToGrid(centerX), y: snapToGrid(centerY) },
-      data:
-        type === "group"
-          ? { slotCount: 4, slots: [], name: "" }
-          : type === "match"
-          ? { scoreA: 0, scoreB: 0, teamA: null, teamB: null, name: "" }
-          : { teamId: null, name: "" },
+      data: {},
     };
+
+    if (type === "group") {
+      newComponent.data = { slotCount: 4, slots: [] };
+    } else if (type === "match") {
+      newComponent.data = { scoreA: 0, scoreB: 0 };
+    }
 
     saveToHistory();
     dispatchComponents({ type: "ADD_COMPONENT", payload: newComponent });
@@ -956,22 +1357,111 @@ const Bracket = ({
   const handleComponentUpdate = (id, data) => {
     dispatchComponents({ type: "UPDATE_COMPONENT", id, updates: { data } });
 
-    // Notify parent if needed
-    if (onBracketUpdate) {
-      onBracketUpdate({ type: "component_update", componentId: id, data });
+    // Check for automatic routing
+    if (data && data.scoreA !== undefined && data.scoreB !== undefined) {
+      const component = components.find((c) => c.id === id);
+      if (component && component.type === "match") {
+        const scoreA = Number(data.scoreA) || 0;
+        const scoreB = Number(data.scoreB) || 0;
+        const hasWinner = scoreA !== scoreB && data.teamA && data.teamB;
+
+        if (hasWinner) {
+          const winnerId = scoreA > scoreB ? data.teamA : data.teamB;
+          const loserId = scoreA > scoreB ? data.teamB : data.teamA;
+
+          // Route winner and loser through connections
+          connections.forEach((conn) => {
+            if (conn.from && conn.from.componentId === id) {
+              const targetComp = components.find(
+                (c) => c.id === conn.to.componentId
+              );
+              if (targetComp) {
+                if (conn.type === "winner" && winnerId) {
+                  routeTeamToComponent(winnerId, targetComp, conn.to.pointId);
+                } else if (conn.type === "loser" && loserId) {
+                  routeTeamToComponent(loserId, targetComp, conn.to.pointId);
+                }
+              }
+            }
+          });
+        }
+      }
+    }
+  };
+
+  const routeTeamToComponent = (teamId, targetComp, pointId) => {
+    if (targetComp.type === "slot") {
+      dispatchComponents({
+        type: "UPDATE_COMPONENT",
+        id: targetComp.id,
+        updates: { data: { ...targetComp.data, teamId } },
+      });
+    } else if (targetComp.type === "match") {
+      const field = pointId === "inA" ? "teamA" : "teamB";
+      dispatchComponents({
+        type: "UPDATE_COMPONENT",
+        id: targetComp.id,
+        updates: { data: { ...targetComp.data, [field]: teamId } },
+      });
     }
   };
 
   const handleComponentDelete = (id) => {
     saveToHistory();
+
+    // Delete connections first
+    connections.forEach((conn) => {
+      if (conn.from.componentId === id || conn.to.componentId === id) {
+        dispatchConnections({ type: "DELETE_CONNECTION", id: conn.id });
+      }
+    });
+
+    // Then delete the component
     dispatchComponents({ type: "DELETE_COMPONENT", id });
   };
 
+  const handleConnectionPoint = (componentId, pointId, type) => {
+    if (!connectionMode) return;
+
+    const connectionId = `${componentId}-${pointId}`;
+
+    if (!selectedConnection) {
+      setSelectedConnection({ componentId, pointId, connectionId });
+    } else {
+      // Create connection
+      if (selectedConnection.componentId !== componentId) {
+        const newConnection = {
+          id: generateId(),
+          type: connectionMode,
+          from: {
+            componentId: selectedConnection.componentId,
+            pointId: selectedConnection.pointId,
+          },
+          to: { componentId, pointId },
+        };
+        saveToHistory();
+        dispatchConnections({ type: "ADD_CONNECTION", payload: newConnection });
+      }
+      setSelectedConnection(null);
+      setConnectionMode(null);
+    }
+  };
+
+  const handleConnectionDelete = (connectionId) => {
+    saveToHistory();
+    dispatchConnections({ type: "DELETE_CONNECTION", id: connectionId });
+  };
+
+  // Edit handlers
   const handleEdit = (id) => {
     const component = components.find((c) => c.id === id);
     if (component) {
       setEditingComponent(component);
-      setEditDialogOpen(true);
+      setEditDialogOpen({
+        group: component.type === "group",
+        slot: component.type === "slot",
+        match: component.type === "match",
+      });
     }
   };
 
@@ -981,11 +1471,41 @@ const Bracket = ({
       dispatchComponents({
         type: "UPDATE_COMPONENT",
         id: editingComponent.id,
-        updates: { data: { ...(editingComponent.data || {}), ...data } },
+        updates: { data: { ...editingComponent.data, ...data } },
       });
     }
     setEditingComponent(null);
-    setEditDialogOpen(false);
+  };
+
+  // Undo/Redo
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const prevState = history[historyIndex - 1];
+      dispatchComponents({
+        type: "SET_COMPONENTS",
+        payload: prevState.components,
+      });
+      dispatchConnections({
+        type: "SET_CONNECTIONS",
+        payload: prevState.connections,
+      });
+      setHistoryIndex(historyIndex - 1);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const nextState = history[historyIndex + 1];
+      dispatchComponents({
+        type: "SET_COMPONENTS",
+        payload: nextState.components,
+      });
+      dispatchConnections({
+        type: "SET_CONNECTIONS",
+        payload: nextState.connections,
+      });
+      setHistoryIndex(historyIndex + 1);
+    }
   };
 
   // Canvas controls
@@ -996,8 +1516,13 @@ const Bracket = ({
     setPanOffset({ x: 0, y: 0 });
   };
 
-  // Canvas panning
+  // Canvas panning functionality
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [panStartOffset, setPanStartOffset] = useState({ x: 0, y: 0 });
+
   const handleCanvasMouseDown = (e) => {
+    // Only start panning if clicking on the canvas background (not on components)
     if (
       e.target.id === "bracket-canvas" ||
       e.target.classList.contains("canvas-background")
@@ -1038,93 +1563,89 @@ const Bracket = ({
     }
   }, [isPanning, handleCanvasMouseMove]);
 
-  // Undo/Redo
-  const handleUndo = () => {
-    if (historyIndex > 0) {
-      const prevState = history[historyIndex - 1];
-      dispatchComponents({
-        type: "SET_COMPONENTS",
-        payload: prevState.components,
-      });
-      setHistoryIndex(historyIndex - 1);
-    }
-  };
-
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      const nextState = history[historyIndex + 1];
-      dispatchComponents({
-        type: "SET_COMPONENTS",
-        payload: nextState.components,
-      });
-      setHistoryIndex(historyIndex + 1);
-    }
-  };
-
   const unplacedTeams = getUnplacedTeams();
 
-  // Read-only view for non-organizers
   if (!organizerMode) {
+    // Read-only view for non-organizers
     return (
       <Box sx={{ mb: 6 }}>
         <Typography variant="h6" sx={{ color: "text.primary", mb: 3 }}>
           Tournament Bracket
         </Typography>
-        {components.length === 0 ? (
-          <Alert severity="info">
-            No bracket has been created yet. The tournament organizer will set
-            up the bracket when ready.
-          </Alert>
-        ) : (
-          <Box
-            sx={{
+        <Box
+          sx={{
+            position: "relative",
+            height: "70vh",
+            backgroundColor: "#0f172a",
+            borderRadius: "12px",
+            overflow: "hidden",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+          }}
+        >
+          <div
+            style={{
               position: "relative",
-              height: "70vh",
-              backgroundColor: "#0f172a",
-              borderRadius: "12px",
-              overflow: "hidden",
-              border: "1px solid rgba(148, 163, 184, 0.2)",
+              width: "100%",
+              height: "100%",
+              transform: `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`,
+              transformOrigin: "center center",
             }}
           >
+            {/* Grid */}
             <div
+              className="canvas-background"
               style={{
-                position: "relative",
-                width: "100%",
-                height: "100%",
-                transform: `scale(${zoom}) translate(${panOffset.x}px, ${panOffset.y}px)`,
-                transformOrigin: "center center",
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                opacity: 0.1,
+                backgroundImage: `
+                  linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+                  linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px)
+                `,
+                backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+                pointerEvents: "auto",
               }}
-            >
-              {components.map((comp) => {
-                const ComponentType = {
-                  group: GroupComponent,
-                  slot: SlotComponent,
-                  match: MatchComponent,
-                }[comp.type];
+            />
 
-                return ComponentType ? (
-                  <ComponentType
-                    key={comp.id}
-                    id={comp.id}
-                    position={comp.position}
-                    data={comp.data}
-                    participants={participants}
-                    deleteMode={false}
-                    onUpdate={() => {}}
-                    onDrag={() => {}}
-                    onEdit={() => {}}
-                    onDelete={() => {}}
-                  />
-                ) : null;
-              })}
-            </div>
-          </Box>
-        )}
+            {/* Connections */}
+            {connections.map((connection) => (
+              <ConnectionLine
+                key={connection.id}
+                connection={connection}
+                components={components}
+                onDelete={handleConnectionDelete}
+                deleteMode={false}
+              />
+            ))}
+
+            {/* Components */}
+            {components.map((comp) => {
+              const ComponentType = {
+                group: GroupComponent,
+                slot: SlotComponent,
+                match: MatchComponent,
+              }[comp.type];
+
+              return ComponentType ? (
+                <ComponentType
+                  key={comp.id}
+                  id={comp.id}
+                  position={comp.position}
+                  data={comp.data}
+                  participants={participants}
+                  deleteMode={false}
+                />
+              ) : null;
+            })}
+          </div>
+        </Box>
       </Box>
     );
   }
 
-  // Organizer mode - full editor
   return (
     <DndContext
       onDragEnd={({ active, over }) => {
@@ -1133,8 +1654,8 @@ const Bracket = ({
         const teamId = String(active.id);
         const dropId = String(over.id);
 
-        // Parse drop target
-        if (dropId.includes("-slot") || dropId.includes("-team")) {
+        // Handle team placement - check for both -slot and -team patterns
+        if (dropId.indexOf("-slot") !== -1 || dropId.indexOf("-team") !== -1) {
           const parts = dropId.split("-");
           const componentId = parts[0];
           const component = components.find((c) => c.id === componentId);
@@ -1144,29 +1665,30 @@ const Bracket = ({
 
             if (component.type === "group") {
               const slotIndex = parseInt(parts[2]) || 0;
-              const newSlots = [...(component.data.slots || [])];
+              const newSlots = Array.isArray(component.data.slots)
+                ? [...component.data.slots]
+                : [];
+              // Ensure array is large enough
               while (newSlots.length <= slotIndex) {
                 newSlots.push(null);
               }
               newSlots[slotIndex] = { teamId, score: 0 };
               handleComponentUpdate(componentId, {
-                ...(component.data || {}),
+                ...component.data,
                 slots: newSlots,
               });
             } else if (component.type === "slot") {
-              handleComponentUpdate(componentId, {
-                ...(component.data || {}),
-                teamId,
-              });
+              handleComponentUpdate(componentId, { ...component.data, teamId });
             } else if (component.type === "match") {
+              // Handle both -teamA and -teamB patterns
               const isTeamA = parts[1] === "teamA";
               const field = isTeamA ? "teamA" : "teamB";
               const scoreField = isTeamA ? "scoreA" : "scoreB";
+              const currentData = component.data || {};
               handleComponentUpdate(componentId, {
-                ...(component.data || {}),
+                ...currentData,
                 [field]: teamId,
-                [scoreField]:
-                  (component.data && component.data[scoreField]) || 0,
+                [scoreField]: currentData[scoreField] || 0,
               });
             }
           }
@@ -1188,6 +1710,7 @@ const Bracket = ({
             alignItems: "center",
           }}
         >
+          {/* Component Buttons */}
           <Button
             variant="outlined"
             startIcon={<Add />}
@@ -1213,16 +1736,75 @@ const Bracket = ({
             Match
           </Button>
 
+          {/* Connection Buttons */}
+          <Button
+            variant={connectionMode === "winner" ? "contained" : "outlined"}
+            onClick={() => {
+              setConnectionMode(connectionMode === "winner" ? null : "winner");
+              setSelectedConnection(null);
+              setDeleteMode(false);
+            }}
+            size="small"
+            sx={{
+              color: connectionMode === "winner" ? "white" : "#4ade80",
+              borderColor: "#4ade80",
+              backgroundColor:
+                connectionMode === "winner" ? "#4ade80" : "transparent",
+            }}
+          >
+            🟢 Winner
+          </Button>
+          <Button
+            variant={connectionMode === "loser" ? "contained" : "outlined"}
+            onClick={() => {
+              setConnectionMode(connectionMode === "loser" ? null : "loser");
+              setSelectedConnection(null);
+              setDeleteMode(false);
+            }}
+            size="small"
+            sx={{
+              color: connectionMode === "loser" ? "white" : "#ef4444",
+              borderColor: "#ef4444",
+              backgroundColor:
+                connectionMode === "loser" ? "#ef4444" : "transparent",
+            }}
+          >
+            🔴 Loser
+          </Button>
+          <Button
+            variant={connectionMode === "normal" ? "contained" : "outlined"}
+            onClick={() => {
+              setConnectionMode(connectionMode === "normal" ? null : "normal");
+              setSelectedConnection(null);
+              setDeleteMode(false);
+            }}
+            size="small"
+            sx={{
+              color: connectionMode === "normal" ? "white" : "#3b82f6",
+              borderColor: "#3b82f6",
+              backgroundColor:
+                connectionMode === "normal" ? "#3b82f6" : "transparent",
+            }}
+          >
+            🔵 Link
+          </Button>
+
+          {/* Delete Button */}
           <Button
             variant={deleteMode ? "contained" : "outlined"}
             startIcon={<Delete />}
-            onClick={() => setDeleteMode(!deleteMode)}
+            onClick={() => {
+              setDeleteMode(!deleteMode);
+              setConnectionMode(null);
+              setSelectedConnection(null);
+            }}
             size="small"
             color="error"
           >
             Delete {deleteMode ? "(ON)" : "(OFF)"}
           </Button>
 
+          {/* Canvas Controls */}
           <Box sx={{ ml: 2, display: "flex", gap: 1, alignItems: "center" }}>
             <IconButton size="small" onClick={handleZoomIn}>
               <ZoomIn />
@@ -1233,8 +1815,14 @@ const Bracket = ({
             <IconButton size="small" onClick={handleResetView}>
               <CenterFocusStrong />
             </IconButton>
+            <Tooltip title="Click and drag on empty areas to pan">
+              <IconButton size="small" disabled>
+                <Info sx={{ fontSize: "16px" }} />
+              </IconButton>
+            </Tooltip>
           </Box>
 
+          {/* Undo/Redo */}
           <Box sx={{ ml: 1, display: "flex", gap: 1 }}>
             <IconButton
               size="small"
@@ -1252,6 +1840,7 @@ const Bracket = ({
             </IconButton>
           </Box>
 
+          {/* Save Indicator */}
           <Chip
             icon={<Save />}
             label="Auto-saved"
@@ -1276,20 +1865,17 @@ const Bracket = ({
               Unplaced Teams ({unplacedTeams.length})
             </Typography>
             <Typography variant="body2" sx={{ color: "text.secondary", mb: 2 }}>
-              Drag teams into bracket components below
+              Drag teams into component slots below
             </Typography>
             <Box
               sx={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-                gap: 2,
+                gap: 1,
               }}
             >
               {unplacedTeams.map((team) => (
-                <DraggableTeam
-                  key={team?._id || team?.id || Math.random()}
-                  team={team}
-                />
+                <DraggableTeam key={team._id} team={team} />
               ))}
             </Box>
           </Paper>
@@ -1321,13 +1907,38 @@ const Bracket = ({
                 : isPanning
                 ? "grabbing"
                 : "grab",
-              backgroundImage: `
-                linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px)
-              `,
-              backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
             }}
           >
+            {/* Grid */}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                opacity: 0.1,
+                backgroundImage: `
+                  linear-gradient(rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+                  linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px)
+                `,
+                backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+                pointerEvents: "none",
+              }}
+            />
+
+            {/* Connections - simple independent rendering */}
+            {connections.map((connection) => (
+              <ConnectionLine
+                key={connection.id}
+                connection={connection}
+                components={components}
+                onDelete={handleConnectionDelete}
+                deleteMode={deleteMode}
+              />
+            ))}
+
+            {/* Components */}
             {components.map((comp) => {
               const ComponentType = {
                 group: GroupComponent,
@@ -1345,6 +1956,8 @@ const Bracket = ({
                   onDrag={handleComponentDrag}
                   onEdit={handleEdit}
                   onDelete={handleComponentDelete}
+                  selectedForConnection={selectedConnection?.connectionId}
+                  onConnectionPoint={handleConnectionPoint}
                   deleteMode={deleteMode}
                   participants={participants}
                 />
@@ -1353,16 +1966,33 @@ const Bracket = ({
           </div>
         </Box>
 
-        {/* Edit Dialog */}
-        <EditDialog
-          open={editDialogOpen}
+        {/* Edit Dialogs */}
+        <EditGroupDialog
+          open={editDialogOpen.group}
           onClose={() => {
-            setEditDialogOpen(false);
+            setEditDialogOpen({ group: false, slot: false, match: false });
             setEditingComponent(null);
           }}
           data={editingComponent?.data}
           onSave={handleEditSave}
-          type={editingComponent?.type}
+        />
+        <EditSlotDialog
+          open={editDialogOpen.slot}
+          onClose={() => {
+            setEditDialogOpen({ group: false, slot: false, match: false });
+            setEditingComponent(null);
+          }}
+          data={editingComponent?.data}
+          onSave={handleEditSave}
+        />
+        <EditMatchDialog
+          open={editDialogOpen.match}
+          onClose={() => {
+            setEditDialogOpen({ group: false, slot: false, match: false });
+            setEditingComponent(null);
+          }}
+          data={editingComponent?.data}
+          onSave={handleEditSave}
         />
       </Box>
     </DndContext>

@@ -182,7 +182,7 @@ export default function EditScrim() {
   }
 
   return (
-    <Paper sx={{ maxWidth: 600, mx: "auto", p: 4 }}>
+    <Paper sx={{ maxWidth: 600, mx: "auto", p: 4, color: "white" }}>
       <Typography variant="h5" gutterBottom>
         Edit Scrim
       </Typography>

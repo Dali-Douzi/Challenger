@@ -110,10 +110,15 @@ const MemberRow = ({
     }
   };
 
+  // Build the full avatar URL; member.user.avatar is stored as "/uploads/avatars/<filename>"
+  const avatarUrl = member.user.avatar
+    ? `http://localhost:4444${member.user.avatar}`
+    : "";
+
   return (
     <ListItem divider sx={{ display: "flex", alignItems: "center" }}>
       <ListItemAvatar>
-        <Avatar src={member.user.avatar} alt={member.user.username}>
+        <Avatar src={avatarUrl} alt={member.user.username}>
           {member.user.username[0]}
         </Avatar>
       </ListItemAvatar>

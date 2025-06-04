@@ -18,37 +18,41 @@ const optionalProtect = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
+    req.user = { id: decoded.id };
   } catch (err) {
-    console.error("❌ Invalid token:", err.message);
-    // Invalid token, continue without user info instead of failing
     req.user = null;
-    next();
   }
+  next();
 };
 
 /**
- * List teams for the current user if `?mine=true` is passed,
- * otherwise fall back to your existing "my teams" logic.
+ * @route   GET /api/teams
+ * @desc    Get all teams (public, but if ?mine=true only return teams the user belongs to)
+ * @access  Public (optional protection)
  */
-router.get("/", protect, async (req, res) => {
-  const userId = req.user.id;
+router.get("/", optionalProtect, async (req, res) => {
   try {
-    if (req.query.mine === "true") {
+    const { mine } = req.query;
+    if (mine === "true" && req.user) {
+      const userId = req.user.id;
       // only teams you belong to
       const teams = await Team.find({ "members.user": userId }).populate(
         "members.user",
-        "username email"
+        "username email avatar"
       );
       return res.status(200).json(teams);
     }
     // fallback: same as GET /my
-    const teams = await Team.find({ "members.user": userId }).populate(
-      "members.user",
-      "username email"
-    );
-    res.status(200).json(teams);
+    if (req.user) {
+      const userId = req.user.id;
+      const teams = await Team.find({ "members.user": userId }).populate(
+        "members.user",
+        "username email avatar"
+      );
+      return res.status(200).json(teams);
+    }
+    // If not authenticated, return empty array or all public teams
+    return res.status(200).json([]);
   } catch (err) {
     console.error("Error fetching teams:", err);
     res.status(500).json({ message: "Error fetching teams" });
@@ -56,134 +60,198 @@ router.get("/", protect, async (req, res) => {
 });
 
 /**
- * Create a new team with optional logo.
- */
-router.post("/create", protect, (req, res) => {
-  // Get the logo upload middleware from app
-  const logoUpload = req.app.get("logoUpload");
-
-  // Use the middleware
-  logoUpload.single("logo")(req, res, async (err) => {
-    if (err) {
-      console.error("🔥 Logo upload error:", err);
-      return res.status(400).json({ message: err.message });
-    }
-
-    const { name, game, rank, server } = req.body;
-    const userId = req.user.id;
-
-    try {
-      const teamCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-
-      const teamData = {
-        name,
-        game,
-        rank,
-        server,
-        owner: userId,
-        members: [{ user: userId, role: "owner", rank }],
-        teamCode,
-      };
-
-      // Add logo if uploaded
-      if (req.file) {
-        teamData.logo = `uploads/logos/${req.file.filename}`;
-      }
-
-      const team = await Team.create(teamData);
-      res.status(201).json(team);
-    } catch (err) {
-      // Clean up uploaded file if team creation failed
-      if (req.file) {
-        const filePath = path.join(
-          __dirname,
-          "..",
-          "uploads",
-          "logos",
-          req.file.filename
-        );
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-
-      if (err.code === 11000 && err.keyPattern?.name) {
-        return res.status(400).json({ message: "Team name already exists" });
-      }
-      console.error("Team creation error:", err);
-      res
-        .status(500)
-        .json({ message: "Error creating team", error: err.message });
-    }
-  });
-});
-
-/**
- * List teams for the current user (duplicate of `/` fallback).
+ * @route   GET /api/teams/my
+ * @desc    Get teams of the logged-in user
+ * @access  Private
  */
 router.get("/my", protect, async (req, res) => {
   const userId = req.user.id;
   try {
     const teams = await Team.find({ "members.user": userId }).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     res.status(200).json(teams);
   } catch (err) {
-    console.error("Error fetching teams:", err);
-    res.status(500).json({ message: "Error fetching teams" });
+    console.error("Error fetching user teams:", err);
+    res.status(500).json({ message: "Error fetching user teams" });
   }
 });
 
 /**
- * Get a team's details (including available ranks for its game).
- * Team code is only visible to team members who are owners or managers.
- * This route is publicly accessible but some info is restricted to team members.
+ * @route   POST /api/teams
+ * @desc    Create a new team
+ * @access  Private
+ */
+router.post("/", protect, async (req, res) => {
+  const { name, gameId, description } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const game = await Game.findById(gameId);
+    if (!game) {
+      return res.status(404).json({ message: "Game not found" });
+    }
+
+    const newTeam = new Team({
+      name,
+      game: gameId,
+      description,
+      owner: userId,
+      members: [{ user: userId, role: "owner", rank: "owner" }],
+      logo: "",
+    });
+
+    await newTeam.save();
+
+    // Add this team to the owner's list
+    const ownerUser = await User.findById(userId);
+    ownerUser.teams.push(newTeam._id);
+    await ownerUser.save();
+
+    const populatedTeam = await Team.findById(newTeam._id).populate(
+      "members.user",
+      "username email avatar"
+    );
+    res.status(201).json(populatedTeam);
+  } catch (err) {
+    console.error("Error creating team:", err);
+    res.status(500).json({ message: "Error creating team" });
+  }
+});
+
+/**
+ * @route   GET /api/teams/:id
+ * @desc    Get a single team by ID
+ * @access  Public (optional protection)
  */
 router.get("/:id", optionalProtect, async (req, res) => {
   const teamId = req.params.id;
-  const userId = req.user?.id; // User might be null if not authenticated
-
   try {
     const team = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     if (!team) return res.status(404).json({ message: "Team not found" });
-
-    const gameDoc = await Game.findOne({ name: team.game });
-    const availableRanks = Array.isArray(gameDoc?.ranks) ? gameDoc.ranks : [];
-
-    // Check if user is a member of this team (only if user is authenticated)
-    const userMember = userId
-      ? team.members.find((m) => m.user._id.toString() === userId)
-      : null;
-
-    // Prepare team object
-    const teamObject = team.toObject();
-
-    // Only show team code to authenticated team members who are owners or managers
-    if (!userMember || !["owner", "manager"].includes(userMember.role)) {
-      delete teamObject.teamCode;
-    }
-
-    res.status(200).json({
-      ...teamObject,
-      availableRanks,
-    });
+    res.status(200).json(team);
   } catch (err) {
     console.error("Error fetching team:", err);
-    res.status(500).json({ message: "Error fetching team details" });
+    res.status(500).json({ message: "Error fetching team" });
   }
 });
 
 /**
- * Upload/Update team logo (owner only).
+ * @route   PUT /api/teams/:id
+ * @desc    Update team details (only owner)
+ * @access  Private
  */
-router.put("/:id/logo", protect, (req, res) => {
-  // Get the logo upload middleware from app
-  const logoUpload = req.app.get("logoUpload");
+router.put("/:id", protect, async (req, res) => {
+  const teamId = req.params.id;
+  const userId = req.user.id;
+  const { name, description, gameId } = req.body;
 
+  try {
+    const team = await Team.findById(teamId);
+    if (!team) return res.status(404).json({ message: "Team not found" });
+
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    if (name) team.name = name;
+    if (description) team.description = description;
+    if (gameId) {
+      const game = await Game.findById(gameId);
+      if (!game) return res.status(404).json({ message: "Game not found" });
+      team.game = gameId;
+    }
+    await team.save();
+
+    const updatedTeam = await Team.findById(teamId).populate(
+      "members.user",
+      "username email avatar"
+    );
+    res.status(200).json(updatedTeam);
+  } catch (err) {
+    console.error("Error updating team:", err);
+    res.status(500).json({ message: "Error updating team" });
+  }
+});
+
+/**
+ * @route   DELETE /api/teams/:id
+ * @desc    Delete a team (only owner)
+ * @access  Private
+ */
+router.delete("/:id", protect, async (req, res) => {
+  const teamId = req.params.id;
+  const userId = req.user.id;
+
+  try {
+    const team = await Team.findById(teamId);
+    if (!team) return res.status(404).json({ message: "Team not found" });
+
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    // Remove logo file if exists
+    if (team.logo) {
+      const logoPath = path.join(
+        __dirname,
+        "../",
+        "uploads",
+        "logos",
+        path.basename(team.logo)
+      );
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+      }
+    }
+
+    // Remove team from members' team lists
+    for (let member of team.members) {
+      const memberUser = await User.findById(member.user);
+      memberUser.teams = memberUser.teams.filter(
+        (t) => t.toString() !== teamId
+      );
+      await memberUser.save();
+    }
+
+    await team.remove();
+    res.status(200).json({ message: "Team deleted" });
+  } catch (err) {
+    console.error("Error deleting team:", err);
+    res.status(500).json({ message: "Error deleting team" });
+  }
+});
+
+/**
+ * @route   PUT /api/teams/:id/logo
+ * @desc    Upload or update a team's logo (only owner)
+ * @access  Private
+ */
+const multer = require("multer");
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/logos/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+const logoUpload = multer({
+  storage,
+  limits: { fileSize: 1024 * 1024 * 5 },
+  fileFilter(req, file, cb) {
+    if (!file.mimetype.startsWith("image/")) {
+      cb(new Error("File must be an image"));
+    }
+    cb(null, true);
+  },
+});
+
+router.put("/:id/logo", protect, (req, res) => {
   // Use the middleware
   logoUpload.single("logo")(req, res, async (err) => {
     if (err) {
@@ -200,22 +268,23 @@ router.put("/:id/logo", protect, (req, res) => {
         return res.status(404).json({ message: "Team not found" });
       }
 
-      // Check if user is the owner
       if (team.owner.toString() !== userId) {
         return res
           .status(403)
-          .json({ message: "Only the owner can update team logo" });
+          .json({ message: "Not authorized to upload logo" });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ message: "No logo file provided" });
-      }
-
-      // Delete old logo if it exists
+      // Delete old logo file if it exists
       if (team.logo) {
-        const oldLogoPath = path.join(__dirname, "..", team.logo);
-        if (fs.existsSync(oldLogoPath)) {
-          fs.unlinkSync(oldLogoPath);
+        const oldPath = path.join(
+          __dirname,
+          "../",
+          "uploads",
+          "logos",
+          path.basename(team.logo)
+        );
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
         }
       }
 
@@ -225,7 +294,7 @@ router.put("/:id/logo", protect, (req, res) => {
 
       const updatedTeam = await Team.findById(teamId).populate(
         "members.user",
-        "username email"
+        "username email avatar"
       );
 
       res.status(200).json({
@@ -233,29 +302,16 @@ router.put("/:id/logo", protect, (req, res) => {
         team: updatedTeam,
       });
     } catch (err) {
-      console.error("Error updating team logo:", err);
-
-      // Clean up uploaded file if there was an error
-      if (req.file) {
-        const filePath = path.join(
-          __dirname,
-          "..",
-          "uploads",
-          "logos",
-          req.file.filename
-        );
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-
-      res.status(500).json({ message: "Error updating team logo" });
+      console.error("Error updating logo:", err);
+      res.status(500).json({ message: "Error updating logo" });
     }
   });
 });
 
 /**
- * Delete team logo (owner only).
+ * @route   DELETE /api/teams/:id/logo
+ * @desc    Delete a team's logo (only owner)
+ * @access  Private
  */
 router.delete("/:id/logo", protect, async (req, res) => {
   const teamId = req.params.id;
@@ -263,23 +319,10 @@ router.delete("/:id/logo", protect, async (req, res) => {
 
   try {
     const team = await Team.findById(teamId);
-    if (!team) {
-      return res.status(404).json({ message: "Team not found" });
-    }
+    if (!team) return res.status(404).json({ message: "Team not found" });
 
-    // Check if user is the owner
     if (team.owner.toString() !== userId) {
-      return res
-        .status(403)
-        .json({ message: "Only the owner can delete team logo" });
-    }
-
-    // Delete logo file if it exists
-    if (team.logo) {
-      const logoPath = path.join(__dirname, "..", team.logo);
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
+      return res.status(403).json({ message: "Not authorized to delete logo" });
     }
 
     // Remove logo from team
@@ -288,7 +331,7 @@ router.delete("/:id/logo", protect, async (req, res) => {
 
     const updatedTeam = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
 
     res.status(200).json({
@@ -302,66 +345,41 @@ router.delete("/:id/logo", protect, async (req, res) => {
 });
 
 /**
- * Delete a team (owner only).
+ * @route   POST /api/teams/:id/join
+ * @desc    Join a team by code (becomes a "player")
+ * @access  Private
  */
-router.delete("/:id", protect, async (req, res) => {
+router.post("/:id/join", protect, async (req, res) => {
   const teamId = req.params.id;
   const userId = req.user.id;
+  const { code } = req.body;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
-    if (team.owner.toString() !== userId) {
-      return res
-        .status(403)
-        .json({ message: "Only the owner can delete this team" });
+
+    if (team.code !== code) {
+      return res.status(401).json({ message: "Invalid code" });
     }
 
-    // Delete team logo if it exists
-    if (team.logo) {
-      const logoPath = path.join(__dirname, "..", team.logo);
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
-    }
-
-    // Remove team reference from all members
-    await User.updateMany({ teams: teamId }, { $pull: { teams: teamId } });
-
-    // Delete the team itself
-    await Team.deleteOne({ _id: teamId });
-
-    res.status(200).json({ message: "Team deleted" });
-  } catch (err) {
-    console.error("Error deleting team:", err);
-    res.status(500).json({ message: "Error deleting team" });
-  }
-});
-
-/**
- * Join a team by its code.
- */
-router.post("/join", protect, async (req, res) => {
-  const { teamCode } = req.body;
-  const userId = req.user.id;
-
-  try {
-    const team = await Team.findOne({ teamCode });
-    if (!team) return res.status(404).json({ message: "Invalid team code" });
+    // Prevent re-joining
     if (team.members.some((m) => m.user.toString() === userId)) {
-      return res
-        .status(400)
-        .json({ message: "You are already a member of this team" });
+      return res.status(400).json({ message: "Already a member" });
     }
 
-    team.members.push({ user: userId, role: "player", rank: team.rank });
+    team.members.push({ user: userId, role: "player", rank: "player" });
     await team.save();
 
-    const user = await User.findById(userId);
-    user.teams.push(team._id);
-    await user.save();
+    // Add team to user's list
+    const memberUser = await User.findById(userId);
+    memberUser.teams.push(teamId);
+    await memberUser.save();
 
-    res.status(200).json({ message: "Joined team successfully", team });
+    const updatedTeam = await Team.findById(teamId).populate(
+      "members.user",
+      "username email avatar"
+    );
+    res.status(200).json({ message: "Joined team", team: updatedTeam });
   } catch (err) {
     console.error("Error joining team:", err);
     res.status(500).json({ message: "Error joining team" });
@@ -369,10 +387,13 @@ router.post("/join", protect, async (req, res) => {
 });
 
 /**
- * Change a member's role.
+ * @route   PUT /api/teams/:teamId/members/:memberId/role
+ * @desc    Change a member's role (only owner)
+ * @access  Private
  */
 router.put("/:teamId/members/:memberId/role", protect, async (req, res) => {
-  const { teamId, memberId } = req.params;
+  const teamId = req.params.teamId;
+  const memberId = req.params.memberId;
   const { role } = req.body;
   const userId = req.user.id;
 
@@ -380,25 +401,13 @@ router.put("/:teamId/members/:memberId/role", protect, async (req, res) => {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    const requester = team.members.find((m) => m.user.toString() === userId);
-    const target = team.members.find((m) => m.user.toString() === memberId);
-    if (!requester || !target) {
-      return res.status(404).json({ message: "Membership not found" });
-    }
-    if (target.role === "owner") {
-      return res.status(403).json({ message: "Cannot change owner's role" });
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
     }
 
-    let allowed = [];
-    if (requester.role === "owner") {
-      allowed = ["manager", "substitute", "player"];
-    } else if (requester.role === "manager") {
-      allowed = ["player", "substitute"];
-    }
-    if (!allowed.includes(role)) {
-      return res
-        .status(403)
-        .json({ message: "Not authorized to assign this role" });
+    const target = team.members.id(memberId);
+    if (!target) {
+      return res.status(404).json({ message: "Member not found" });
     }
 
     target.role = role;
@@ -406,20 +415,23 @@ router.put("/:teamId/members/:memberId/role", protect, async (req, res) => {
 
     const updatedTeam = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     res.status(200).json(updatedTeam);
   } catch (err) {
     console.error("Error updating role:", err);
-    res.status(500).json({ message: "Error updating member role" });
+    res.status(500).json({ message: "Error updating role" });
   }
 });
 
 /**
- * Change a member's rank.
+ * @route   PUT /api/teams/:teamId/members/:memberId/rank
+ * @desc    Change a member's rank (only owner)
+ * @access  Private
  */
 router.put("/:teamId/members/:memberId/rank", protect, async (req, res) => {
-  const { teamId, memberId } = req.params;
+  const teamId = req.params.teamId;
+  const memberId = req.params.memberId;
   const { rank } = req.body;
   const userId = req.user.id;
 
@@ -427,19 +439,13 @@ router.put("/:teamId/members/:memberId/rank", protect, async (req, res) => {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    const requester = team.members.find((m) => m.user.toString() === userId);
-    const target = team.members.find((m) => m.user.toString() === memberId);
-    if (!requester || !target) {
-      return res.status(404).json({ message: "Membership not found" });
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
     }
 
-    if (!["owner", "manager"].includes(requester.role)) {
-      return res.status(403).json({ message: "Not authorized to change rank" });
-    }
-
-    const gameDoc = await Game.findOne({ name: team.game });
-    if (!Array.isArray(gameDoc?.ranks) || !gameDoc.ranks.includes(rank)) {
-      return res.status(400).json({ message: "Invalid rank for this game" });
+    const target = team.members.id(memberId);
+    if (!target) {
+      return res.status(404).json({ message: "Member not found" });
     }
 
     target.rank = rank;
@@ -447,48 +453,44 @@ router.put("/:teamId/members/:memberId/rank", protect, async (req, res) => {
 
     const updatedTeam = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     res.status(200).json(updatedTeam);
   } catch (err) {
     console.error("Error updating rank:", err);
-    res.status(500).json({ message: "Error updating member rank" });
+    res.status(500).json({ message: "Error updating rank" });
   }
 });
 
 /**
- * Leave the team (self-remove).
+ * @route   DELETE /api/teams/:teamId/members/self
+ * @desc    Leave the team (self)
+ * @access  Private
  */
 router.delete("/:teamId/members/self", protect, async (req, res) => {
-  const { teamId } = req.params;
+  const teamId = req.params.teamId;
   const userId = req.user.id;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    const selfMember = team.members.find((m) => m.user.toString() === userId);
-    if (!selfMember) {
-      return res
-        .status(400)
-        .json({ message: "You are not a member of this team" });
-    }
-    if (selfMember.role === "owner") {
-      return res
-        .status(403)
-        .json({ message: "Owner must transfer ownership before leaving" });
+    // Prevent owner from leaving
+    if (team.owner.toString() === userId) {
+      return res.status(400).json({ message: "Owner cannot leave team" });
     }
 
     team.members = team.members.filter((m) => m.user.toString() !== userId);
     await team.save();
 
-    const user = await User.findById(userId);
-    user.teams = user.teams.filter((t) => t.toString() !== teamId);
-    await user.save();
+    // Remove team from user's list
+    const memberUser = await User.findById(userId);
+    memberUser.teams = memberUser.teams.filter((t) => t.toString() !== teamId);
+    await memberUser.save();
 
     const updatedTeam = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     res.status(200).json({ message: "Left team", team: updatedTeam });
   } catch (err) {
@@ -498,36 +500,45 @@ router.delete("/:teamId/members/self", protect, async (req, res) => {
 });
 
 /**
- * Kick a member (owner only).
+ * @route   DELETE /api/teams/:teamId/members/:memberId
+ * @desc    Remove a member from the team (only owner)
+ * @access  Private
  */
 router.delete("/:teamId/members/:memberId", protect, async (req, res) => {
-  const { teamId, memberId } = req.params;
+  const teamId = req.params.teamId;
+  const memberId = req.params.memberId;
   const userId = req.user.id;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    const requester = team.members.find((m) => m.user.toString() === userId);
-    if (!requester || requester.role !== "owner") {
-      return res.status(403).json({ message: "Only owner can remove members" });
-    }
-    if (memberId === userId) {
-      return res
-        .status(400)
-        .json({ message: "Owner cannot remove themselves" });
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
     }
 
-    team.members = team.members.filter((m) => m.user.toString() !== memberId);
+    const memberToRemove = team.members.id(memberId);
+    if (!memberToRemove) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    // Prevent owner from removing themselves
+    if (memberToRemove.user.toString() === userId) {
+      return res.status(400).json({ message: "Owner cannot be removed" });
+    }
+
+    // Remove from team and save
+    team.members = team.members.filter((m) => m._id.toString() !== memberId);
     await team.save();
 
-    const memberUser = await User.findById(memberId);
+    // Remove team from user
+    const memberUser = await User.findById(memberToRemove.user);
     memberUser.teams = memberUser.teams.filter((t) => t.toString() !== teamId);
     await memberUser.save();
 
     const updatedTeam = await Team.findById(teamId).populate(
       "members.user",
-      "username email"
+      "username email avatar"
     );
     res.status(200).json({ message: "Member removed", team: updatedTeam });
   } catch (err) {
