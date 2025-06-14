@@ -1,64 +1,90 @@
 const jwt = require("jsonwebtoken");
-const Tournament = require("../models/Tournament");
 
-// Protect middleware: validates JWT and attaches user to request
-const protect = (req, res, next) => {
-  const token = req.header("Authorization")?.split(" ")[1];
-
-  if (!token) {
-    return res
-      .status(401)
-      .json({ message: "Not authorized, no token provided" });
-  }
-
+const authMiddleware = async (req, res, next) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    console.error("❌ Invalid token:", err.message);
-    return res.status(401).json({ message: "Invalid token" });
+    let token = req.cookies?.accessToken;
+
+    if (!token && req.header("Authorization")) {
+      const authHeader = req.header("Authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.substring(7);
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Access denied. No token provided.",
+      });
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+      next();
+    } catch (tokenError) {
+      if (tokenError.name === "TokenExpiredError") {
+        const refreshToken = req.cookies?.refreshToken;
+
+        if (!refreshToken) {
+          return res.status(401).json({
+            success: false,
+            message: "Access token expired and no refresh token provided.",
+            code: "TOKEN_EXPIRED",
+          });
+        }
+
+        try {
+          const refreshDecoded = jwt.verify(
+            refreshToken,
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+          );
+
+          const newAccessToken = jwt.sign(
+            { userId: refreshDecoded.userId },
+            process.env.JWT_SECRET,
+            { expiresIn: "15m" }
+          );
+
+          const cookieConfig = {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+            maxAge: 15 * 60 * 1000,
+            domain:
+              process.env.NODE_ENV === "production"
+                ? process.env.COOKIE_DOMAIN
+                : undefined,
+          };
+
+          res.cookie("accessToken", newAccessToken, cookieConfig);
+
+          req.user = { userId: refreshDecoded.userId };
+          next();
+        } catch (refreshError) {
+          res.clearCookie("accessToken");
+          res.clearCookie("refreshToken");
+
+          return res.status(401).json({
+            success: false,
+            message: "Invalid or expired refresh token. Please login again.",
+            code: "REFRESH_TOKEN_INVALID",
+          });
+        }
+      } else {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid token.",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Auth middleware error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error in authentication.",
+    });
   }
 };
 
-// Checks if the authenticated user is the organizer of the tournament
-const isOrganizer = async (req, res, next) => {
-  try {
-    const tourney = await Tournament.findById(req.params.id);
-    if (!tourney) {
-      return res.status(404).json({ message: "Tournament not found" });
-    }
-    if (tourney.organizer.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Organizer only" });
-    }
-    next();
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-// Checks if the authenticated user is a referee or the organizer
-const isRefereeOrOrganizer = async (req, res, next) => {
-  try {
-    const tourney = await Tournament.findById(req.params.id);
-    if (!tourney) {
-      return res.status(404).json({ message: "Tournament not found" });
-    }
-    const isOrg = tourney.organizer.toString() === req.user.id;
-    const isRef = tourney.referees.some((r) => r.toString() === req.user.id);
-    if (!isOrg && !isRef) {
-      return res.status(403).json({ message: "Referee or organizer only" });
-    }
-    next();
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-module.exports = {
-  protect,
-  isOrganizer,
-  isRefereeOrOrganizer,
-};
+module.exports = authMiddleware;

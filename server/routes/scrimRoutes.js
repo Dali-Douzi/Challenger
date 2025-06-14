@@ -5,7 +5,7 @@ const Team = require("../models/Team");
 const Game = require("../models/Game");
 const Notification = require("../models/Notification");
 const ScrimChat = require("../models/ScrimChat");
-const { protect } = require("../middleware/authMiddleware");
+const protect = require("../middleware/authMiddleware");
 
 const router = express.Router();
 

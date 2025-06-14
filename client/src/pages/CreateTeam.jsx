@@ -15,7 +15,8 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import Navbar from "../components/Navbar";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const VisuallyHiddenInput = styled("input")({
   clip: "rect(0 0 0 0)",
@@ -29,7 +30,6 @@ const VisuallyHiddenInput = styled("input")({
   width: 1,
 });
 
-// Helper to get team name initials
 const getTeamInitials = (teamName) => {
   if (typeof teamName !== "string" || !teamName.trim()) return "";
   return teamName
@@ -41,32 +41,61 @@ const getTeamInitials = (teamName) => {
 };
 
 const CreateTeam = () => {
+  const navigate = useNavigate();
+  const { makeAuthenticatedRequest } = useAuth();
+
   const [name, setName] = useState("");
   const [game, setGame] = useState("");
   const [rank, setRank] = useState("");
   const [server, setServer] = useState("");
+  const [description, setDescription] = useState("");
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState("");
   const [gamesList, setGamesList] = useState([]);
   const [ranksList, setRanksList] = useState([]);
   const [serversList, setServersList] = useState([]);
   const [teamCode, setTeamCode] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    // Fetch available games
     const fetchGames = async () => {
       try {
-        const res = await fetch("http://localhost:4444/api/games");
+        console.log("🎮 Fetching games from new endpoint...");
+        const res = await fetch("http://localhost:4444/api/teams/games");
+        console.log("🎮 Response status:", res.status);
+
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+
         const data = await res.json();
-        setGamesList(data);
+        console.log("🎮 Received data:", data);
+
+        if (Array.isArray(data)) {
+          setGamesList(data);
+          console.log("🎮 Games set successfully:", data.length);
+        } else {
+          console.error("🎮 Data is not an array:", data);
+          setGamesList([]);
+        }
       } catch (err) {
         console.error("Error fetching games:", err);
+        setGamesList([]);
       }
     };
     fetchGames();
   }, []);
 
-  // Logo preview effect
+  const handleGameChange = (event) => {
+    const selectedGameName = event.target.value;
+    setGame(selectedGameName);
+    const selectedGameObj = gamesList.find((g) => g.name === selectedGameName);
+    setRanksList(selectedGameObj?.ranks || []);
+    setServersList(selectedGameObj?.servers || []);
+    setRank("");
+    setServer("");
+  };
+
   useEffect(() => {
     if (logoFile) {
       const url = URL.createObjectURL(logoFile);
@@ -76,244 +105,217 @@ const CreateTeam = () => {
     setLogoPreview("");
   }, [logoFile]);
 
-  const handleGameChange = (event) => {
-    const selectedGame = event.target.value;
-    setGame(selectedGame);
-    const selectedGameObj = gamesList.find((g) => g.name === selectedGame);
-    setRanksList(selectedGameObj?.ranks || []);
-    setServersList(selectedGameObj?.servers || []);
-    setRank("");
-    setServer("");
-  };
-
-  const handleServerChange = (event) => {
-    setServer(event.target.value);
-  };
-
   const handleLogoUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
-    // Validate file type
     if (!file.type.startsWith("image/")) {
       alert("Please select an image file");
       return;
     }
-
-    // Validate file size (5MB)
     if (file.size > 5 * 1024 * 1024) {
       alert("File size must be less than 5MB");
       return;
     }
-
     setLogoFile(file);
-  };
-
-  const handleRemoveLogo = () => {
-    setLogoFile(null);
-    setLogoPreview("");
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const token = localStorage.getItem("token");
-
+    if (!name || !game || !rank || !server) {
+      alert("Please fill in all required fields");
+      return;
+    }
+    setIsSubmitting(true);
     try {
-      let response;
+      const formData = new FormData();
+      formData.append("name", name);
+      formData.append("game", game);
+      formData.append("rank", rank);
+      formData.append("server", server);
+      if (description) formData.append("description", description);
+      if (logoFile) formData.append("logo", logoFile);
 
-      if (logoFile) {
-        // Use FormData when logo is included
-        const formData = new FormData();
-        formData.append("name", name);
-        formData.append("game", game);
-        formData.append("rank", rank);
-        formData.append("server", server);
-        formData.append("logo", logoFile);
+      // Use fetch directly instead of makeAuthenticatedRequest for FormData
+      const response = await fetch("http://localhost:4444/api/teams/create", {
+        method: "POST",
+        credentials: "include", // Include cookies for authentication
+        body: formData,
+        // Don't set Content-Type header - let browser set it with boundary
+      });
 
-        response = await fetch("http://localhost:4444/api/teams/create", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        });
-      } else {
-        // Use JSON when no logo
-        const teamData = { name, game, rank, server };
-        response = await fetch("http://localhost:4444/api/teams/create", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(teamData),
-        });
-      }
-
-      if (response.ok) {
+      if (response && response.ok) {
         const team = await response.json();
         setTeamCode(team.teamCode);
         alert("Team created successfully!");
-      } else {
+        setTimeout(() => navigate(`/teams/${team._id}`), 2000);
+      } else if (response) {
         const data = await response.json();
         alert(data.message || "Failed to create team");
       }
     } catch (err) {
       console.error("Team creation error:", err);
-      alert("Server error");
+      alert("Server error. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const teamInitials = getTeamInitials(name);
-
   return (
-    <>
-      <Navbar />
-      <Container maxWidth="sm">
-        <Paper sx={{ padding: 4, mt: 4 }}>
-          <Typography variant="h5" gutterBottom>
-            Create a New Team
-          </Typography>
-          <Box
-            component="form"
-            onSubmit={handleSubmit}
-            display="flex"
-            flexDirection="column"
-            gap={2}
-          >
-            {/* Team Logo Section */}
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Team Logo (Optional)
-              </Typography>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Avatar
-                  src={logoPreview}
-                  sx={{
-                    width: 64,
-                    height: 64,
-                    fontSize: "1.2rem",
-                    fontWeight: "bold",
-                  }}
+    <Container maxWidth="sm">
+      <Paper sx={{ padding: 4, mt: 4 }}>
+        <Typography variant="h5" gutterBottom>
+          Create a New Team
+        </Typography>
+        <Box
+          component="form"
+          onSubmit={handleSubmit}
+          display="flex"
+          flexDirection="column"
+          gap={2}
+        >
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Team Logo (Optional)
+            </Typography>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Avatar
+                src={logoPreview}
+                sx={{
+                  width: 64,
+                  height: 64,
+                  fontSize: "1.2rem",
+                  fontWeight: "bold",
+                }}
+              >
+                {getTeamInitials(name)}
+              </Avatar>
+              <Box>
+                <Button
+                  component="label"
+                  variant="outlined"
+                  startIcon={<CloudUploadIcon />}
+                  sx={{ mb: 1 }}
+                  size="small"
                 >
-                  {teamInitials}
-                </Avatar>
-                <Box>
+                  Upload Logo
+                  <VisuallyHiddenInput
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                  />
+                </Button>
+                {logoFile && (
                   <Button
-                    component="label"
-                    variant="outlined"
-                    startIcon={<CloudUploadIcon />}
-                    sx={{ mb: 1 }}
+                    variant="text"
+                    color="error"
+                    onClick={() => setLogoFile(null)}
                     size="small"
-                  >
-                    Upload Logo
-                    <VisuallyHiddenInput
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoUpload}
-                    />
-                  </Button>
-                  {logoFile && (
-                    <Button
-                      variant="text"
-                      color="error"
-                      onClick={handleRemoveLogo}
-                      size="small"
-                      sx={{ display: "block" }}
-                    >
-                      Remove Logo
-                    </Button>
-                  )}
-                  <Typography
-                    variant="caption"
-                    color="textSecondary"
                     sx={{ display: "block" }}
                   >
-                    Max 5MB, JPG/PNG/GIF
-                  </Typography>
-                </Box>
-              </Stack>
-            </Box>
-
-            <TextField
-              label="Team Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              fullWidth
-              variant="filled"
-              required
-            />
-
-            <FormControl fullWidth variant="filled" required>
-              <InputLabel id="game-label">Game</InputLabel>
-              <Select
-                labelId="game-label"
-                id="game-select"
-                value={game}
-                label="Game"
-                onChange={handleGameChange}
-              >
-                <MenuItem value="">Select a Game</MenuItem>
-                {gamesList.map((g) => (
-                  <MenuItem key={g.name} value={g.name}>
-                    {g.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth variant="filled" required>
-              <InputLabel id="rank-label">Rank</InputLabel>
-              <Select
-                labelId="rank-label"
-                id="rank-select"
-                value={rank}
-                label="Rank"
-                onChange={(e) => setRank(e.target.value)}
-              >
-                <MenuItem value="">Select a Rank</MenuItem>
-                {ranksList.map((r) => (
-                  <MenuItem key={r} value={r}>
-                    {r}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth variant="filled" required>
-              <InputLabel id="server-label">Server</InputLabel>
-              <Select
-                labelId="server-label"
-                id="server-select"
-                value={server}
-                label="Server"
-                onChange={handleServerChange}
-              >
-                <MenuItem value="">Select a Server</MenuItem>
-                {serversList.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <Button type="submit" variant="contained" color="primary">
-              Create Team
-            </Button>
+                    Remove Logo
+                  </Button>
+                )}
+                <Typography
+                  variant="caption"
+                  color="textSecondary"
+                  sx={{ display: "block" }}
+                >
+                  Max 5MB, JPG/PNG/GIF
+                </Typography>
+              </Box>
+            </Stack>
           </Box>
 
-          {teamCode && (
-            <Box sx={{ mt: 4 }}>
-              <Typography variant="h6">Your Team Code: {teamCode}</Typography>
-              <Typography>
-                Share this code with others to let them join your team!
-              </Typography>
-            </Box>
-          )}
-        </Paper>
-      </Container>
-    </>
+          <TextField
+            label="Team Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            fullWidth
+            variant="filled"
+            required
+          />
+
+          <TextField
+            label="Description (Optional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            fullWidth
+            variant="filled"
+            multiline
+            rows={2}
+            placeholder="Tell us about your team..."
+          />
+
+          <FormControl fullWidth variant="filled" required>
+            <InputLabel>Game</InputLabel>
+            <Select value={game} onChange={handleGameChange}>
+              <MenuItem value="">Select a Game</MenuItem>
+              {gamesList.map((g) => (
+                <MenuItem key={g._id || g.name} value={g.name}>
+                  {g.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth variant="filled" required>
+            <InputLabel>Rank</InputLabel>
+            <Select
+              value={rank}
+              onChange={(e) => setRank(e.target.value)}
+              disabled={!game}
+            >
+              <MenuItem value="">Select a Rank</MenuItem>
+              {ranksList.map((r) => (
+                <MenuItem key={r} value={r}>
+                  {r}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth variant="filled" required>
+            <InputLabel>Server</InputLabel>
+            <Select
+              value={server}
+              onChange={(e) => setServer(e.target.value)}
+              disabled={!game}
+            >
+              <MenuItem value="">Select a Server</MenuItem>
+              {serversList.map((s) => (
+                <MenuItem key={s} value={s}>
+                  {s}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            disabled={isSubmitting || !name || !game || !rank || !server}
+          >
+            {isSubmitting ? "Creating Team..." : "Create Team"}
+          </Button>
+        </Box>
+
+        {teamCode && (
+          <Box sx={{ mt: 4, p: 2, bgcolor: "background", borderRadius: 1 }}>
+            <Typography variant="h6" gutterBottom>
+              Team Created Successfully! 🎉
+            </Typography>
+            <Typography variant="body1" gutterBottom>
+              Your Team Code: <strong>{teamCode}</strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Share this code so others can join your team! Redirecting to your
+              team page...
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+    </Container>
   );
 };
 

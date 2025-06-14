@@ -8,7 +8,7 @@ import {
   Chip,
   Divider,
 } from "@mui/material";
-import api from "../utils/api";
+import axios from "axios";
 
 const ControlsSection = ({ tournament, onAction }) => {
   const [error, setError] = useState("");
@@ -28,7 +28,7 @@ const ControlsSection = ({ tournament, onAction }) => {
     try {
       setError("");
       setLoading(true);
-      await api[method](`/tournaments/${id}${url}`, data); // ✅ Using api instead of axios
+      await axios[method](`/tournaments/${id}${url}`, data);
       onAction(); // Refresh tournament data
     } catch (err) {
       setError(err.response?.data?.message || "Error performing action");

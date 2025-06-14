@@ -4,7 +4,7 @@ import axios from "axios";
 
 import Navbar from "../components/Navbar";
 import ScrimChat from "./ScrimChat";
-import { AuthContext } from "../context/AuthContext";
+import AuthContext from "../context/AuthContext";
 import { io } from "socket.io-client";
 
 import {

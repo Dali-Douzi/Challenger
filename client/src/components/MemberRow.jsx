@@ -7,7 +7,7 @@ import {
   CircularProgress,
   Box,
 } from "@mui/material";
-import { AuthContext } from "../context/AuthContext";
+import AuthContext from "../context/AuthContext";
 import RoleDropdown from "./RoleDropdown";
 import RankDropdown from "./RankDropdown";
 
@@ -18,25 +18,26 @@ const MemberRow = ({
   availableRanks,
   onMemberChange,
 }) => {
-  const { user } = useContext(AuthContext);
-  const token = localStorage.getItem("token");
+  const { user, makeAuthenticatedRequest } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
 
   const handleRankChange = async (newRank) => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `http://localhost:4444/api/teams/${teamId}/members/${member.user._id}/rank`,
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${teamId}/members/${member._id}/rank`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ rank: newRank }),
         }
       );
-      if (!res.ok) throw new Error("Failed to update rank");
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Failed to update rank");
+      }
       onMemberChange();
     } catch (err) {
       console.error(err);
@@ -49,18 +50,20 @@ const MemberRow = ({
   const handleRoleChange = async (newRole) => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `http://localhost:4444/api/teams/${teamId}/members/${member.user._id}/role`,
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${teamId}/members/${member._id}/role`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ role: newRole }),
         }
       );
-      if (!res.ok) throw new Error("Failed to update role");
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Failed to update role");
+      }
       onMemberChange();
     } catch (err) {
       console.error(err);
@@ -71,16 +74,26 @@ const MemberRow = ({
   };
 
   const handleKick = async () => {
+    if (
+      !window.confirm(
+        `Are you sure you want to remove ${member.user.username} from the team?`
+      )
+    ) {
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch(
-        `http://localhost:4444/api/teams/${teamId}/members/${member.user._id}`,
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${teamId}/members/${member._id}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
-      if (!res.ok) throw new Error("Failed to remove member");
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Failed to remove member");
+      }
       onMemberChange();
     } catch (err) {
       console.error(err);
@@ -91,16 +104,22 @@ const MemberRow = ({
   };
 
   const handleLeave = async () => {
+    if (!window.confirm("Are you sure you want to leave this team?")) {
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await makeAuthenticatedRequest(
         `http://localhost:4444/api/teams/${teamId}/members/self`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
-      if (!res.ok) throw new Error("Failed to leave team");
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Failed to leave team");
+      }
       onMemberChange();
     } catch (err) {
       console.error(err);
@@ -119,7 +138,7 @@ const MemberRow = ({
     <ListItem divider sx={{ display: "flex", alignItems: "center" }}>
       <ListItemAvatar>
         <Avatar src={avatarUrl} alt={member.user.username}>
-          {member.user.username[0]}
+          {member.user.username[0].toUpperCase()}
         </Avatar>
       </ListItemAvatar>
 
@@ -139,7 +158,7 @@ const MemberRow = ({
             memberId={member.user._id}
             memberRole={member.role}
             currentUserRole={currentUserRole}
-            currentUserId={user._id}
+            currentUserId={user?.id || user?._id}
             onRoleChange={handleRoleChange}
             onKick={handleKick}
             onLeave={handleLeave}

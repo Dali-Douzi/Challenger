@@ -6,396 +6,470 @@ const jwt = require("jsonwebtoken");
 const Team = require("../models/Team");
 const User = require("../models/User");
 const Game = require("../models/Game");
-const { protect } = require("../middleware/authMiddleware");
+const Scrim = require("../models/Scrim");
+const Notification = require("../models/Notification");
+const ScrimChat = require("../models/ScrimChat");
+const protect = require("../middleware/authMiddleware");
+const multer = require("multer");
+
+const logoStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    const uploadDir = "uploads/logos/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename(req, file, cb) {
+    const uniqueName = `${Date.now()}-${Math.round(
+      Math.random() * 1e9
+    )}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+const logoUpload = multer({
+  storage: logoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter(req, file, cb) {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed for team logo"));
+    }
+    cb(null, true);
+  },
+});
 
 const optionalProtect = (req, res, next) => {
   const token = req.header("Authorization")?.split(" ")[1];
-
   if (!token) {
     req.user = null;
     return next();
   }
-
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { id: decoded.id };
+    req.user = { id: decoded.userId };
   } catch (err) {
     req.user = null;
   }
   next();
 };
 
-/**
- * @route   GET /api/teams
- * @desc    Get all teams (public, but if ?mine=true only return teams the user belongs to)
- * @access  Public (optional protection)
- */
-router.get("/", optionalProtect, async (req, res) => {
+// Games endpoint - moved from server.js
+router.get("/games", async (req, res) => {
   try {
-    const { mine } = req.query;
-    if (mine === "true" && req.user) {
-      const userId = req.user.id;
-      // only teams you belong to
-      const teams = await Team.find({ "members.user": userId }).populate(
-        "members.user",
-        "username email avatar"
-      );
-      return res.status(200).json(teams);
-    }
-    // fallback: same as GET /my
-    if (req.user) {
-      const userId = req.user.id;
-      const teams = await Team.find({ "members.user": userId }).populate(
-        "members.user",
-        "username email avatar"
-      );
-      return res.status(200).json(teams);
-    }
-    // If not authenticated, return empty array or all public teams
-    return res.status(200).json([]);
-  } catch (err) {
-    console.error("Error fetching teams:", err);
-    res.status(500).json({ message: "Error fetching teams" });
-  }
-});
+    console.log("🎮 Fetching games from database...");
 
-/**
- * @route   GET /api/teams/my
- * @desc    Get teams of the logged-in user
- * @access  Private
- */
-router.get("/my", protect, async (req, res) => {
-  const userId = req.user.id;
-  try {
-    const teams = await Team.find({ "members.user": userId }).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json(teams);
-  } catch (err) {
-    console.error("Error fetching user teams:", err);
-    res.status(500).json({ message: "Error fetching user teams" });
-  }
-});
-
-/**
- * @route   POST /api/teams
- * @desc    Create a new team
- * @access  Private
- */
-router.post("/", protect, async (req, res) => {
-  const { name, gameId, description } = req.body;
-  const userId = req.user.id;
-
-  try {
-    const game = await Game.findById(gameId);
-    if (!game) {
-      return res.status(404).json({ message: "Game not found" });
-    }
-
-    const newTeam = new Team({
-      name,
-      game: gameId,
-      description,
-      owner: userId,
-      members: [{ user: userId, role: "owner", rank: "owner" }],
-      logo: "",
+    // Set cache headers for better performance
+    res.set({
+      "Cache-Control": "public, max-age=300", // Cache for 5 minutes
+      ETag: `"games-${Date.now()}"`,
     });
 
-    await newTeam.save();
+    const games = await Game.find({}).lean(); // Use lean() for better performance
+    console.log("🎮 Games found:", games.length);
+    console.log("🎮 Games data:", games);
 
-    // Add this team to the owner's list
-    const ownerUser = await User.findById(userId);
-    ownerUser.teams.push(newTeam._id);
-    await ownerUser.save();
-
-    const populatedTeam = await Team.findById(newTeam._id).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(201).json(populatedTeam);
-  } catch (err) {
-    console.error("Error creating team:", err);
-    res.status(500).json({ message: "Error creating team" });
+    // Return games directly as array for frontend compatibility
+    res.json(games);
+  } catch (error) {
+    console.error("❌ Error fetching games:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching games",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
   }
 });
 
-/**
- * @route   GET /api/teams/:id
- * @desc    Get a single team by ID
- * @access  Public (optional protection)
- */
-router.get("/:id", optionalProtect, async (req, res) => {
-  const teamId = req.params.id;
+router.get("/my", protect, async (req, res) => {
   try {
-    const team = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    if (!team) return res.status(404).json({ message: "Team not found" });
-    res.status(200).json(team);
+    const userId = req.user.userId;
+    const teams = await Team.find({ "members.user": userId })
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json(teams);
   } catch (err) {
-    console.error("Error fetching team:", err);
-    res.status(500).json({ message: "Error fetching team" });
+    console.error("Error fetching user teams:", err);
+    return res.status(500).json({ message: "Error fetching user teams" });
   }
 });
 
-/**
- * @route   PUT /api/teams/:id
- * @desc    Update team details (only owner)
- * @access  Private
- */
-router.put("/:id", protect, async (req, res) => {
-  const teamId = req.params.id;
-  const userId = req.user.id;
-  const { name, description, gameId } = req.body;
-
-  try {
-    const team = await Team.findById(teamId);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-
-    if (team.owner.toString() !== userId) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    if (name) team.name = name;
-    if (description) team.description = description;
-    if (gameId) {
-      const game = await Game.findById(gameId);
-      if (!game) return res.status(404).json({ message: "Game not found" });
-      team.game = gameId;
-    }
-    await team.save();
-
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json(updatedTeam);
-  } catch (err) {
-    console.error("Error updating team:", err);
-    res.status(500).json({ message: "Error updating team" });
-  }
-});
-
-/**
- * @route   DELETE /api/teams/:id
- * @desc    Delete a team (only owner)
- * @access  Private
- */
-router.delete("/:id", protect, async (req, res) => {
-  const teamId = req.params.id;
-  const userId = req.user.id;
-
-  try {
-    const team = await Team.findById(teamId);
-    if (!team) return res.status(404).json({ message: "Team not found" });
-
-    if (team.owner.toString() !== userId) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    // Remove logo file if exists
-    if (team.logo) {
-      const logoPath = path.join(
-        __dirname,
-        "../",
-        "uploads",
-        "logos",
-        path.basename(team.logo)
-      );
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
-    }
-
-    // Remove team from members' team lists
-    for (let member of team.members) {
-      const memberUser = await User.findById(member.user);
-      memberUser.teams = memberUser.teams.filter(
-        (t) => t.toString() !== teamId
-      );
-      await memberUser.save();
-    }
-
-    await team.remove();
-    res.status(200).json({ message: "Team deleted" });
-  } catch (err) {
-    console.error("Error deleting team:", err);
-    res.status(500).json({ message: "Error deleting team" });
-  }
-});
-
-/**
- * @route   PUT /api/teams/:id/logo
- * @desc    Upload or update a team's logo (only owner)
- * @access  Private
- */
-const multer = require("multer");
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/logos/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const logoUpload = multer({
-  storage,
-  limits: { fileSize: 1024 * 1024 * 5 },
-  fileFilter(req, file, cb) {
-    if (!file.mimetype.startsWith("image/")) {
-      cb(new Error("File must be an image"));
-    }
-    cb(null, true);
-  },
-});
-
-router.put("/:id/logo", protect, (req, res) => {
-  // Use the middleware
+router.post("/create", protect, (req, res) => {
   logoUpload.single("logo")(req, res, async (err) => {
     if (err) {
-      console.error("🔥 Logo upload error:", err);
+      console.error("Logo upload error:", err);
       return res.status(400).json({ message: err.message });
     }
 
-    const teamId = req.params.id;
-    const userId = req.user.id;
+    const { name, game, rank, server, description } = req.body;
+    const userId = req.user.userId;
+
+    if (!name || !game || !rank || !server) {
+      return res
+        .status(400)
+        .json({ message: "Please provide name, game, rank, and server" });
+    }
 
     try {
-      const team = await Team.findById(teamId);
-      if (!team) {
-        return res.status(404).json({ message: "Team not found" });
+      const gameDoc = await Game.findOne({ name: game });
+      if (!gameDoc) {
+        return res.status(404).json({ message: "Game not found" });
       }
 
-      if (team.owner.toString() !== userId) {
-        return res
-          .status(403)
-          .json({ message: "Not authorized to upload logo" });
+      const teamCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const newTeamData = {
+        name,
+        game: gameDoc._id,
+        rank,
+        server,
+        description: description || "",
+        owner: userId,
+        members: [{ user: userId, role: "owner", rank }],
+        teamCode: teamCode,
+        logo: req.file ? `uploads/logos/${req.file.filename}` : "",
+      };
+
+      const newTeam = new Team(newTeamData);
+      await newTeam.save();
+
+      const ownerUser = await User.findById(userId);
+      if (ownerUser) {
+        ownerUser.teams.push(newTeam._id);
+        await ownerUser.save();
       }
 
-      // Delete old logo file if it exists
-      if (team.logo) {
-        const oldPath = path.join(
-          __dirname,
-          "../",
-          "uploads",
-          "logos",
-          path.basename(team.logo)
-        );
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
-      }
-
-      // Update team with new logo path
-      team.logo = `uploads/logos/${req.file.filename}`;
-      await team.save();
-
-      const updatedTeam = await Team.findById(teamId).populate(
-        "members.user",
-        "username email avatar"
-      );
-
-      res.status(200).json({
-        message: "Team logo updated successfully",
-        team: updatedTeam,
-      });
-    } catch (err) {
-      console.error("Error updating logo:", err);
-      res.status(500).json({ message: "Error updating logo" });
+      const populatedTeam = await Team.findById(newTeam._id)
+        .populate("members.user", "username email avatar")
+        .populate("game", "name");
+      return res.status(201).json(populatedTeam);
+    } catch (error) {
+      console.error("Error creating team:", error);
+      return res.status(500).json({ message: "Error creating team" });
     }
   });
 });
 
-/**
- * @route   DELETE /api/teams/:id/logo
- * @desc    Delete a team's logo (only owner)
- * @access  Private
- */
+router.post("/join", protect, async (req, res) => {
+  const userId = req.user.userId;
+  const { teamCode } = req.body;
+
+  if (!teamCode) {
+    return res.status(400).json({ message: "Team code is required" });
+  }
+
+  try {
+    const team = await Team.findOne({ teamCode: teamCode.toUpperCase() });
+    if (!team) {
+      return res.status(404).json({ message: "Invalid team code" });
+    }
+
+    if (team.members.some((m) => m.user.toString() === userId)) {
+      return res.status(400).json({ message: "Already a member of this team" });
+    }
+
+    team.members.push({ user: userId, role: "player", rank: team.rank });
+    await team.save();
+
+    const memberUser = await User.findById(userId);
+    if (memberUser) {
+      memberUser.teams.push(team._id);
+      await memberUser.save();
+    }
+
+    const updatedTeam = await Team.findById(team._id)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+
+    return res
+      .status(200)
+      .json({ message: "Joined team successfully", team: updatedTeam });
+  } catch (error) {
+    console.error("Error joining team:", error);
+    return res.status(500).json({ message: "Error joining team" });
+  }
+});
+
+router.get("/:id", optionalProtect, async (req, res) => {
+  const teamId = req.params.id;
+  try {
+    const team = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    if (!team) return res.status(404).json({ message: "Team not found" });
+    return res.status(200).json(team);
+  } catch (err) {
+    console.error("Error fetching team:", err);
+    return res.status(500).json({ message: "Error fetching team" });
+  }
+});
+
+router.put("/:id", protect, (req, res) => {
+  logoUpload.single("logo")(req, res, async (err) => {
+    if (err) {
+      console.error("Logo upload error:", err);
+      return res.status(400).json({ message: err.message });
+    }
+
+    const teamId = req.params.id;
+    const userId = req.user.userId;
+    const { name, game, rank, server, description } = req.body;
+
+    try {
+      const team = await Team.findById(teamId);
+      if (!team) return res.status(404).json({ message: "Team not found" });
+
+      if (team.owner.toString() !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (name) team.name = name;
+      if (game) {
+        const gameDoc = await Game.findOne({ name: game });
+        if (!gameDoc) {
+          return res.status(404).json({ message: "Game not found" });
+        }
+        team.game = gameDoc._id;
+      }
+      if (rank) team.rank = rank;
+      if (server) team.server = server;
+      if (description !== undefined) team.description = description;
+
+      if (req.file) {
+        if (team.logo) {
+          const oldLogoPath = path.join(__dirname, "../", team.logo);
+          if (fs.existsSync(oldLogoPath)) {
+            fs.unlinkSync(oldLogoPath);
+          }
+        }
+        team.logo = `uploads/logos/${req.file.filename}`;
+      }
+
+      await team.save();
+
+      const updatedTeam = await Team.findById(teamId)
+        .populate("members.user", "username email avatar")
+        .populate("game", "name");
+      return res.status(200).json(updatedTeam);
+    } catch (error) {
+      console.error("Error updating team:", error);
+      return res.status(500).json({ message: "Error updating team" });
+    }
+  });
+});
+
+router.put("/:id/logo", protect, (req, res) => {
+  logoUpload.single("logo")(req, res, async (err) => {
+    if (err) {
+      console.error("Logo upload error:", err);
+      return res.status(400).json({ message: err.message });
+    }
+
+    const teamId = req.params.id;
+    const userId = req.user.userId;
+
+    try {
+      const team = await Team.findById(teamId);
+      if (!team) return res.status(404).json({ message: "Team not found" });
+
+      if (team.owner.toString() !== userId) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "No logo file provided" });
+      }
+
+      if (team.logo) {
+        const oldLogoPath = path.join(__dirname, "../", team.logo);
+        if (fs.existsSync(oldLogoPath)) {
+          fs.unlinkSync(oldLogoPath);
+        }
+      }
+
+      team.logo = `uploads/logos/${req.file.filename}`;
+      await team.save();
+
+      const updatedTeam = await Team.findById(teamId)
+        .populate("members.user", "username email avatar")
+        .populate("game", "name");
+      return res.status(200).json(updatedTeam);
+    } catch (error) {
+      console.error("Error updating logo:", error);
+      return res.status(500).json({ message: "Error updating logo" });
+    }
+  });
+});
+
 router.delete("/:id/logo", protect, async (req, res) => {
   const teamId = req.params.id;
-  const userId = req.user.id;
+  const userId = req.user.userId;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
     if (team.owner.toString() !== userId) {
-      return res.status(403).json({ message: "Not authorized to delete logo" });
+      return res.status(403).json({ message: "Not authorized" });
     }
 
-    // Remove logo from team
-    team.logo = "";
-    await team.save();
+    if (team.logo) {
+      const logoPath = path.join(__dirname, "../", team.logo);
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+      }
+      team.logo = "";
+      await team.save();
+    }
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-
-    res.status(200).json({
-      message: "Team logo deleted successfully",
-      team: updatedTeam,
-    });
-  } catch (err) {
-    console.error("Error deleting team logo:", err);
-    res.status(500).json({ message: "Error deleting team logo" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json(updatedTeam);
+  } catch (error) {
+    console.error("Error deleting logo:", error);
+    return res.status(500).json({ message: "Error deleting logo" });
   }
 });
 
-/**
- * @route   POST /api/teams/:id/join
- * @desc    Join a team by code (becomes a "player")
- * @access  Private
- */
 router.post("/:id/join", protect, async (req, res) => {
   const teamId = req.params.id;
-  const userId = req.user.id;
+  const userId = req.user.userId;
   const { code } = req.body;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    if (team.code !== code) {
+    if (team.teamCode !== code) {
       return res.status(401).json({ message: "Invalid code" });
     }
 
-    // Prevent re-joining
     if (team.members.some((m) => m.user.toString() === userId)) {
       return res.status(400).json({ message: "Already a member" });
     }
 
-    team.members.push({ user: userId, role: "player", rank: "player" });
+    team.members.push({ user: userId, role: "player", rank: team.rank });
     await team.save();
 
-    // Add team to user's list
     const memberUser = await User.findById(userId);
-    memberUser.teams.push(teamId);
-    await memberUser.save();
+    if (memberUser) {
+      memberUser.teams.push(teamId);
+      await memberUser.save();
+    }
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json({ message: "Joined team", team: updatedTeam });
-  } catch (err) {
-    console.error("Error joining team:", err);
-    res.status(500).json({ message: "Error joining team" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json({ message: "Joined team", team: updatedTeam });
+  } catch (error) {
+    console.error("Error joining team:", error);
+    return res.status(500).json({ message: "Error joining team" });
   }
 });
 
-/**
- * @route   PUT /api/teams/:teamId/members/:memberId/role
- * @desc    Change a member's role (only owner)
- * @access  Private
- */
+// Enhanced team deletion with immediate cleanup of orphaned scrims
+router.delete("/:id", protect, async (req, res) => {
+  const teamId = req.params.id;
+  const userId = req.user.userId;
+
+  try {
+    const team = await Team.findById(teamId);
+    if (!team) return res.status(404).json({ message: "Team not found" });
+
+    if (team.owner.toString() !== userId) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    console.log(`🗑️ Team deletion initiated: ${team.name} by user ${userId}`);
+
+    // Delete team logo file if exists
+    if (team.logo) {
+      const logoPath = path.join(__dirname, "../", team.logo);
+      if (fs.existsSync(logoPath)) {
+        fs.unlinkSync(logoPath);
+      }
+    }
+
+    // Remove team from all members' teams arrays
+    for (const member of team.members) {
+      const memberUser = await User.findById(member.user);
+      if (memberUser) {
+        memberUser.teams = memberUser.teams.filter(
+          (tId) => tId.toString() !== teamId
+        );
+        await memberUser.save();
+      }
+    }
+
+    // Delete the team
+    await Team.findByIdAndDelete(teamId);
+
+    console.log(`✅ Team deleted: ${team.name}`);
+
+    // Immediate cleanup of orphaned scrims where this team was teamA (posting team)
+    try {
+      console.log("🧹 Cleaning scrims where deleted team was posting team...");
+
+      const orphanedScrims = await Scrim.find({ teamA: teamId });
+      let cleanedScrims = 0;
+
+      for (const scrim of orphanedScrims) {
+        // Delete related data
+        await ScrimChat.deleteMany({ scrim: scrim._id });
+        await Notification.deleteMany({ scrim: scrim._id });
+
+        // Emit socket event if available
+        const io = req.app.get("io");
+        if (io) {
+          // Notify all relevant teams that the scrim was deleted
+          const allTeams = [
+            ...(Array.isArray(scrim.requests)
+              ? scrim.requests.map((id) => id.toString())
+              : []),
+            ...(scrim.teamB ? [scrim.teamB.toString()] : []),
+          ];
+
+          allTeams.forEach((notifyTeamId) => {
+            io.emit("scrimDeleted", {
+              teamId: notifyTeamId,
+              scrimId: scrim._id,
+              message: `Scrim deleted because ${team.name} was deleted`,
+            });
+          });
+        }
+
+        await Scrim.findByIdAndDelete(scrim._id);
+        cleanedScrims++;
+        console.log(`🧹 Cleaned orphaned scrim: ${scrim._id}`);
+      }
+
+      // Also clean this team from requests arrays of other scrims
+      const updatedScrims = await Scrim.updateMany(
+        { requests: teamId },
+        { $pull: { requests: teamId } }
+      );
+
+      console.log(
+        `✅ Team deletion cleanup completed: ${cleanedScrims} scrims removed, ${updatedScrims.modifiedCount} scrims updated`
+      );
+    } catch (cleanupError) {
+      console.error("⚠️ Team deletion cleanup failed:", cleanupError);
+    }
+
+    return res.status(200).json({
+      message: "Team deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting team:", error);
+    return res.status(500).json({ message: "Error deleting team" });
+  }
+});
+
 router.put("/:teamId/members/:memberId/role", protect, async (req, res) => {
   const teamId = req.params.teamId;
   const memberId = req.params.memberId;
   const { role } = req.body;
-  const userId = req.user.id;
+  const userId = req.user.userId;
 
   try {
     const team = await Team.findById(teamId);
@@ -413,27 +487,21 @@ router.put("/:teamId/members/:memberId/role", protect, async (req, res) => {
     target.role = role;
     await team.save();
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json(updatedTeam);
-  } catch (err) {
-    console.error("Error updating role:", err);
-    res.status(500).json({ message: "Error updating role" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json(updatedTeam);
+  } catch (error) {
+    console.error("Error updating role:", error);
+    return res.status(500).json({ message: "Error updating role" });
   }
 });
 
-/**
- * @route   PUT /api/teams/:teamId/members/:memberId/rank
- * @desc    Change a member's rank (only owner)
- * @access  Private
- */
 router.put("/:teamId/members/:memberId/rank", protect, async (req, res) => {
   const teamId = req.params.teamId;
   const memberId = req.params.memberId;
   const { rank } = req.body;
-  const userId = req.user.id;
+  const userId = req.user.userId;
 
   try {
     const team = await Team.findById(teamId);
@@ -451,31 +519,24 @@ router.put("/:teamId/members/:memberId/rank", protect, async (req, res) => {
     target.rank = rank;
     await team.save();
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json(updatedTeam);
-  } catch (err) {
-    console.error("Error updating rank:", err);
-    res.status(500).json({ message: "Error updating rank" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json(updatedTeam);
+  } catch (error) {
+    console.error("Error updating rank:", error);
+    return res.status(500).json({ message: "Error updating rank" });
   }
 });
 
-/**
- * @route   DELETE /api/teams/:teamId/members/self
- * @desc    Leave the team (self)
- * @access  Private
- */
 router.delete("/:teamId/members/self", protect, async (req, res) => {
   const teamId = req.params.teamId;
-  const userId = req.user.id;
+  const userId = req.user.userId;
 
   try {
     const team = await Team.findById(teamId);
     if (!team) return res.status(404).json({ message: "Team not found" });
 
-    // Prevent owner from leaving
     if (team.owner.toString() === userId) {
       return res.status(400).json({ message: "Owner cannot leave team" });
     }
@@ -483,31 +544,24 @@ router.delete("/:teamId/members/self", protect, async (req, res) => {
     team.members = team.members.filter((m) => m.user.toString() !== userId);
     await team.save();
 
-    // Remove team from user's list
     const memberUser = await User.findById(userId);
     memberUser.teams = memberUser.teams.filter((t) => t.toString() !== teamId);
     await memberUser.save();
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json({ message: "Left team", team: updatedTeam });
-  } catch (err) {
-    console.error("Error leaving team:", err);
-    res.status(500).json({ message: "Error leaving team" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res.status(200).json({ message: "Left team", team: updatedTeam });
+  } catch (error) {
+    console.error("Error leaving team:", error);
+    return res.status(500).json({ message: "Error leaving team" });
   }
 });
 
-/**
- * @route   DELETE /api/teams/:teamId/members/:memberId
- * @desc    Remove a member from the team (only owner)
- * @access  Private
- */
 router.delete("/:teamId/members/:memberId", protect, async (req, res) => {
   const teamId = req.params.teamId;
   const memberId = req.params.memberId;
-  const userId = req.user.id;
+  const userId = req.user.userId;
 
   try {
     const team = await Team.findById(teamId);
@@ -522,28 +576,26 @@ router.delete("/:teamId/members/:memberId", protect, async (req, res) => {
       return res.status(404).json({ message: "Member not found" });
     }
 
-    // Prevent owner from removing themselves
     if (memberToRemove.user.toString() === userId) {
       return res.status(400).json({ message: "Owner cannot be removed" });
     }
 
-    // Remove from team and save
     team.members = team.members.filter((m) => m._id.toString() !== memberId);
     await team.save();
 
-    // Remove team from user
     const memberUser = await User.findById(memberToRemove.user);
     memberUser.teams = memberUser.teams.filter((t) => t.toString() !== teamId);
     await memberUser.save();
 
-    const updatedTeam = await Team.findById(teamId).populate(
-      "members.user",
-      "username email avatar"
-    );
-    res.status(200).json({ message: "Member removed", team: updatedTeam });
-  } catch (err) {
-    console.error("Error removing member:", err);
-    res.status(500).json({ message: "Error removing member" });
+    const updatedTeam = await Team.findById(teamId)
+      .populate("members.user", "username email avatar")
+      .populate("game", "name");
+    return res
+      .status(200)
+      .json({ message: "Member removed", team: updatedTeam });
+  } catch (error) {
+    console.error("Error removing member:", error);
+    return res.status(500).json({ message: "Error removing member" });
   }
 });
 

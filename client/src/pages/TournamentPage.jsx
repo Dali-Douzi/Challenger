@@ -34,8 +34,7 @@ import Bracket from "../components/Bracket";
 import ControlsSection from "../components/ControlsSection";
 
 import moment from "moment";
-import api from "../utils/api"; // ✅ Use authenticated API
-
+import axios from "axios";
 import EventIcon from "@mui/icons-material/Event";
 import VideogameAssetIcon from "@mui/icons-material/VideogameAsset";
 import GroupIcon from "@mui/icons-material/Group";
@@ -63,11 +62,9 @@ const TournamentPage = () => {
   const [bracketUpdateLoading, setBracketUpdateLoading] = useState(false);
   const [joinTeamModalOpen, setJoinTeamModalOpen] = useState(false);
 
-  // Handle success message from match page redirect
   useEffect(() => {
     if (location.state?.successMessage) {
       setSuccessMessage(location.state.successMessage);
-      // Clear the state to prevent the message from showing again on refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, navigate, location.pathname]);
@@ -114,7 +111,6 @@ const TournamentPage = () => {
     return myTeams.some((myTeam) => !tournamentTeamIds.has(myTeam._id));
   }, [tournament, myTeams, loadingMyTeams, isOrganizer]);
 
-  // Get teams that can join (not already in tournament)
   const eligibleTeamsToJoin = React.useMemo(() => {
     if (!myTeams || !tournament) return [];
     const tournamentTeamIds = new Set([
@@ -124,11 +120,9 @@ const TournamentPage = () => {
     return myTeams.filter((myTeam) => !tournamentTeamIds.has(myTeam._id));
   }, [myTeams, tournament]);
 
-  // State for join team modal
   const [selectedTeamToJoin, setSelectedTeamToJoin] = useState("");
   const [joinTeamLoading, setJoinTeamLoading] = useState(false);
 
-  // Join team handler
   const handleJoinTournament = async () => {
     if (!selectedTeamToJoin) return;
 
@@ -136,8 +130,7 @@ const TournamentPage = () => {
     setPageError("");
 
     try {
-      await api.post(`/tournaments/${id}/teams`, {
-        // ✅ Using api instead of axios
+      await axios.post(`/tournaments/${id}/teams`, {
         teamId: selectedTeamToJoin,
       });
 
@@ -146,7 +139,7 @@ const TournamentPage = () => {
       setSuccessMessage(`${teamName} request submitted successfully!`);
       setJoinTeamModalOpen(false);
       setSelectedTeamToJoin("");
-      await handleTournamentAction(); // Refresh data
+      await handleTournamentAction();
     } catch (err) {
       setPageError(err.response?.data?.message || "Failed to join tournament");
     } finally {
@@ -159,11 +152,9 @@ const TournamentPage = () => {
     if (myTeamsError) setPageError(myTeamsError);
   }, [error, myTeamsError]);
 
-  // Enhanced bracket update handler with better validation and feedback
   const handleBracketUpdate = async (updateInfo) => {
     const { phaseIndex, slot, teamId, position } = updateInfo;
 
-    // Validation
     if (
       typeof phaseIndex !== "number" ||
       typeof slot !== "number" ||
@@ -174,7 +165,6 @@ const TournamentPage = () => {
       return;
     }
 
-    // Check tournament status
     if (tournament.status !== "BRACKET_LOCKED") {
       setPageError(
         `Cannot update bracket when tournament status is "${tournament.status}". Bracket must be locked first.`
@@ -182,7 +172,6 @@ const TournamentPage = () => {
       return;
     }
 
-    // Check if user is organizer
     if (!isOrganizer) {
       setPageError("Only tournament organizers can update the bracket.");
       return;
@@ -192,13 +181,11 @@ const TournamentPage = () => {
     setPageError("");
 
     try {
-      // Validate the team exists in tournament
       const teamExists = tournament.teams.some((team) => team._id === teamId);
       if (!teamExists) {
         throw new Error("Selected team is not part of this tournament");
       }
 
-      // Validate the phase and slot exist
       if (!tournament.phases[phaseIndex]) {
         throw new Error(`Invalid phase index: ${phaseIndex}`);
       }
@@ -212,12 +199,10 @@ const TournamentPage = () => {
         );
       }
 
-      // Check if match is already completed
       if (targetMatch.status === "COMPLETED") {
         throw new Error("Cannot modify completed matches");
       }
 
-      // Prevent placing same team in both slots
       if (
         position === "A" &&
         targetMatch.teamB &&
@@ -233,10 +218,9 @@ const TournamentPage = () => {
         throw new Error("Cannot place the same team in both slots of a match");
       }
 
-      // Check if team is already placed elsewhere in this phase
       const currentPhaseMatches = matchesByPhase[phaseIndex] || [];
       const teamAlreadyPlaced = currentPhaseMatches.some((match) => {
-        if (match.slot === slot) return false; // Ignore the target match
+        if (match.slot === slot) return false;
         return (
           (match.teamA && match.teamA._id === teamId) ||
           (match.teamB && match.teamB._id === teamId)
@@ -249,7 +233,6 @@ const TournamentPage = () => {
         );
       }
 
-      // Build the update payload
       let matchChanges = { slot };
 
       if (position === "A") {
@@ -265,16 +248,14 @@ const TournamentPage = () => {
         matches: [matchChanges],
       };
 
-      await api.put(`/tournaments/${id}/bracket`, payload); // ✅ Using api instead of axios
+      await axios.put(`/tournaments/${id}/bracket`, payload);
 
-      // Show success message
       const teamName =
         tournament.teams.find((t) => t._id === teamId)?.name || "Team";
       setSuccessMessage(
         `${teamName} placed in Match ${slot} position ${position}`
       );
 
-      // Refresh data to show the update
       await refresh();
     } catch (err) {
       if (err.response?.status === 400) {
@@ -295,7 +276,6 @@ const TournamentPage = () => {
     }
   };
 
-  // Enhanced action handler with better feedback
   const handleTournamentAction = async () => {
     setPageError("");
     setSuccessMessage("");
@@ -558,7 +538,7 @@ const TournamentPage = () => {
                 )
               ) {
                 try {
-                  await api.delete(`/tournaments/${id}`); // ✅ Using api instead of axios
+                  await axios.delete(`/tournaments/${id}`);
                   setSuccessMessage("Tournament cancelled successfully");
                   setTimeout(() => navigate("/tournaments"), 2000);
                 } catch (err) {
@@ -584,7 +564,7 @@ const TournamentPage = () => {
                 )
               ) {
                 try {
-                  await api.delete(
+                  await axios.delete(
                     `/tournaments/${id}/referees/${currentUser._id}`
                   ); // ✅ Using api instead of axios
                   setSuccessMessage("You have quit as referee");

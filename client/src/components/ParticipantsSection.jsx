@@ -30,9 +30,9 @@ import {
   InfoOutlined,
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
-import api from "../utils/api";
 import ActionModal from "./ActionModal";
 import useMyTeams from "../hooks/useMyTeams";
+import axios from "axios";
 
 const ParticipantsSection = ({ tournament, onUpdate }) => {
   const [refModalOpen, setRefModalOpen] = useState(false);
@@ -89,7 +89,7 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
   const handleApprove = async (teamId) => {
     setError("");
     try {
-      await api.put(`/tournaments/${tournament._id}/teams/${teamId}/approve`); // ✅ Using api instead of axios
+      await axios.put(`/tournaments/${tournament._id}/teams/${teamId}/approve`); // ✅ Using axios instead of axios
       onUpdate();
     } catch (err) {
       setError(err.response?.data?.message || "Error approving team");
@@ -99,7 +99,7 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
   const handleRemoveTeam = async (teamId, isPending = false) => {
     setError("");
     try {
-      await api.delete(`/tournaments/${tournament._id}/teams/${teamId}`); // ✅ Using api instead of axios
+      await axios.delete(`/tournaments/${tournament._id}/teams/${teamId}`); // ✅ Using api instead of axios
       onUpdate();
     } catch (err) {
       setError(
@@ -112,7 +112,7 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
   const handleAddReferee = async (code) => {
     setError("");
     try {
-      await api.post(`/tournaments/${tournament._id}/referees`, { code }); // ✅ Using api instead of axios
+      await axios.post(`/tournaments/${tournament._id}/referees`, { code }); // ✅ Using api instead of axios
       onUpdate();
     } catch (err) {
       setError(err.response?.data?.message || "Error adding referee");
@@ -122,7 +122,7 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
   const handleRemoveReferee = async (userId) => {
     setError("");
     try {
-      await api.delete(`/tournaments/${tournament._id}/referees/${userId}`); // ✅ Using api instead of axios
+      await axios.delete(`/tournaments/${tournament._id}/referees/${userId}`); // ✅ Using api instead of axios
       onUpdate();
     } catch (err) {
       setError(err.response?.data?.message || "Error removing referee");
@@ -133,7 +133,7 @@ const ParticipantsSection = ({ tournament, onUpdate }) => {
     if (!selectedTeamToJoin) return;
     setSignupError("");
     try {
-      await api.post(`/tournaments/${tournament._id}/teams`, {
+      await axios.post(`/tournaments/${tournament._id}/teams`, {
         // ✅ Using api instead of axios
         teamId: selectedTeamToJoin,
       });

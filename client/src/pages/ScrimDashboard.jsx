@@ -18,6 +18,7 @@ import {
   Stack,
   IconButton,
 } from "@mui/material";
+import { useAuth } from "../context/AuthContext";
 
 const API_BASE = "http://localhost:4444";
 
@@ -34,7 +35,7 @@ const getTeamInitials = (teamName) => {
 
 const ScrimDashboard = () => {
   const navigate = useNavigate();
-  const token = localStorage.getItem("token") || "";
+  const { token, makeAuthenticatedRequest } = useAuth();
 
   const parseJwt = (t) => {
     try {
@@ -72,19 +73,24 @@ const ScrimDashboard = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("http://localhost:4444/api/teams/my", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        setTeams(data);
-        if (data.length > 0) setSelectedTeam(data[0]._id);
+        const res = await makeAuthenticatedRequest(
+          "http://localhost:4444/api/teams/my"
+        );
+        if (res) {
+          const data = await res.json();
+          // Ensure data is always an array
+          const teamsArray = Array.isArray(data) ? data : [];
+          setTeams(teamsArray);
+          if (teamsArray.length > 0) setSelectedTeam(teamsArray[0]._id);
+        }
       } catch (err) {
         console.error(err);
+        setTeams([]); // Set to empty array on error
       } finally {
         setLoading((l) => ({ ...l, teams: false }));
       }
     })();
-  }, [token]);
+  }, [makeAuthenticatedRequest]);
 
   // 2) Fetch all games (to derive formats)
   useEffect(() => {
@@ -93,9 +99,12 @@ const ScrimDashboard = () => {
         const res = await fetch("http://localhost:4444/api/games");
         const data = await res.json();
         console.log("GAMES →", data);
-        setGames(data);
+        // Ensure data is always an array
+        const gamesArray = Array.isArray(data) ? data : [];
+        setGames(gamesArray);
       } catch (err) {
         console.error(err);
+        setGames([]); // Set to empty array on error
       } finally {
         setLoading((l) => ({ ...l, games: false }));
       }
@@ -144,11 +153,13 @@ const ScrimDashboard = () => {
       if (selectedGameFilter) params.append("game", selectedGameFilter);
       if (selectedServerFilter) params.append("server", selectedServerFilter);
       if (selectedRankFilter) params.append("rank", selectedRankFilter);
-      const res = await fetch(`/api/scrims?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setScrims(Array.isArray(data) ? data : []);
+      const res = await makeAuthenticatedRequest(
+        `/api/scrims?${params.toString()}`
+      );
+      if (res) {
+        const data = await res.json();
+        setScrims(Array.isArray(data) ? data : []);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -158,7 +169,9 @@ const ScrimDashboard = () => {
 
   // Re-fetch whenever filters change
   useEffect(() => {
-    fetchScrims();
+    if (token) {
+      fetchScrims();
+    }
   }, [token, selectedGameFilter, selectedServerFilter, selectedRankFilter]);
 
   // Persist "Request Sent"
@@ -210,19 +223,21 @@ const ScrimDashboard = () => {
 
     setLoading((l) => ({ ...l, posting: true }));
     try {
-      const res = await fetch("http://localhost:4444/api/scrims", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          teamId: selectedTeam,
-          format,
-          scheduledTime: dt.toISOString(),
-        }),
-      });
-      if (!res.ok) {
+      const res = await makeAuthenticatedRequest(
+        "http://localhost:4444/api/scrims",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            teamId: selectedTeam,
+            format,
+            scheduledTime: dt.toISOString(),
+          }),
+        }
+      );
+      if (res && !res.ok) {
         const err = await res.json();
         throw new Error(err.message || "Failed to post scrim");
       }
@@ -242,18 +257,17 @@ const ScrimDashboard = () => {
     if (!selectedRequestTeam || requested.includes(scrimId)) return;
     setRequested((prev) => [...prev, scrimId]);
     try {
-      const res = await fetch(
+      const res = await makeAuthenticatedRequest(
         `http://localhost:4444/api/scrims/request/${scrimId}`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ teamId: selectedRequestTeam }),
         }
       );
-      if (!res.ok) {
+      if (res && !res.ok) {
         const errData = await res.json();
         if (errData.message === "Scrim request already sent") return;
         throw new Error(errData.message || "Failed to send request");
@@ -267,7 +281,7 @@ const ScrimDashboard = () => {
 
   // Edit scrim handler
   const handleEditScrim = (scrimId) => {
-    localStorage.setItem("editingScrimId", scrimId);
+    sessionStorage.setItem("editingScrimId", scrimId);
     window.location.href = "/scrims/edit";
   };
 
@@ -449,11 +463,12 @@ const ScrimDashboard = () => {
               <MenuItem value="">
                 <em>All</em>
               </MenuItem>
-              {games.map((g) => (
-                <MenuItem key={g._id} value={g.name}>
-                  {g.name}
-                </MenuItem>
-              ))}
+              {Array.isArray(games) &&
+                games.map((g) => (
+                  <MenuItem key={g._id} value={g.name}>
+                    {g.name}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
 
@@ -468,11 +483,12 @@ const ScrimDashboard = () => {
               <MenuItem value="">
                 <em>All</em>
               </MenuItem>
-              {serverOptions.map((srv) => (
-                <MenuItem key={srv} value={srv}>
-                  {srv}
-                </MenuItem>
-              ))}
+              {Array.isArray(serverOptions) &&
+                serverOptions.map((srv) => (
+                  <MenuItem key={srv} value={srv}>
+                    {srv}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
 
@@ -487,11 +503,12 @@ const ScrimDashboard = () => {
               <MenuItem value="">
                 <em>All</em>
               </MenuItem>
-              {rankOptions.map((rk) => (
-                <MenuItem key={rk} value={rk}>
-                  {rk}
-                </MenuItem>
-              ))}
+              {Array.isArray(rankOptions) &&
+                rankOptions.map((rk) => (
+                  <MenuItem key={rk} value={rk}>
+                    {rk}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
         </Box>
@@ -513,11 +530,12 @@ const ScrimDashboard = () => {
             <MenuItem value="">
               <em>Choose a team</em>
             </MenuItem>
-            {teams.map((t) => (
-              <MenuItem key={t._id} value={t._id}>
-                {t.name}
-              </MenuItem>
-            ))}
+            {Array.isArray(teams) &&
+              teams.map((t) => (
+                <MenuItem key={t._id} value={t._id}>
+                  {t.name}
+                </MenuItem>
+              ))}
           </Select>
         </FormControl>
 
@@ -525,74 +543,79 @@ const ScrimDashboard = () => {
           <Typography>No scrims found.</Typography>
         ) : (
           <List>
-            {scrims.map((s) => {
-              const isOwnTeam = s.teamA?._id === selectedTeam;
-              const hasRequested = requested.includes(s._id);
+            {Array.isArray(scrims) &&
+              scrims.map((s) => {
+                const isOwnTeam = s.teamA?._id === selectedTeam;
+                const hasRequested = requested.includes(s._id);
 
-              let btnText = "";
-              let btnDisabled = false;
-              let btnAction = null;
+                let btnText = "";
+                let btnDisabled = false;
+                let btnAction = null;
 
-              if (s.status === "booked") {
-                btnText = "Booked";
-                btnDisabled = true;
-              } else if (isOwnTeam) {
-                btnText = "Edit";
-                btnAction = () => handleEditScrim(s._id);
-              } else if (hasRequested) {
-                btnText = "Request Sent";
-                btnDisabled = true;
-              } else {
-                btnText = "Send Request";
-                btnDisabled = !selectedRequestTeam;
-                btnAction = () => handleSendRequest(s._id);
-              }
+                if (s.status === "booked") {
+                  btnText = "Booked";
+                  btnDisabled = true;
+                } else if (isOwnTeam) {
+                  btnText = "Edit";
+                  btnAction = () => handleEditScrim(s._id);
+                } else if (hasRequested) {
+                  btnText = "Request Sent";
+                  btnDisabled = true;
+                } else {
+                  btnText = "Send Request";
+                  btnDisabled = !selectedRequestTeam;
+                  btnAction = () => handleSendRequest(s._id);
+                }
 
-              return (
-                <ListItem
-                  key={s._id}
-                  divider
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <Box sx={{ flex: 1 }}>
-                    {/* Team logos and names */}
-                    <Box sx={{ mb: 1 }}>
-                      {s.teamB ? (
-                        <Stack direction="row" alignItems="center" spacing={2}>
-                          {renderTeamWithLogo(s.teamA)}
-                          <Typography variant="body2" sx={{ mx: 1 }}>
-                            vs
-                          </Typography>
-                          {renderTeamWithLogo(s.teamB)}
-                        </Stack>
-                      ) : (
-                        renderTeamWithLogo(s.teamA)
-                      )}
+                return (
+                  <ListItem
+                    key={s._id}
+                    divider
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <Box sx={{ flex: 1 }}>
+                      {/* Team logos and names */}
+                      <Box sx={{ mb: 1 }}>
+                        {s.teamB ? (
+                          <Stack
+                            direction="row"
+                            alignItems="center"
+                            spacing={2}
+                          >
+                            {renderTeamWithLogo(s.teamA)}
+                            <Typography variant="body2" sx={{ mx: 1 }}>
+                              vs
+                            </Typography>
+                            {renderTeamWithLogo(s.teamB)}
+                          </Stack>
+                        ) : (
+                          renderTeamWithLogo(s.teamA)
+                        )}
+                      </Box>
+
+                      {/* Scrim details */}
+                      <Typography variant="body2" color="text.secondary">
+                        Format: {s.format} | Time:{" "}
+                        {new Date(s.scheduledTime).toLocaleString()} | Status:{" "}
+                        {s.status}
+                      </Typography>
                     </Box>
 
-                    {/* Scrim details */}
-                    <Typography variant="body2" color="text.secondary">
-                      Format: {s.format} | Time:{" "}
-                      {new Date(s.scheduledTime).toLocaleString()} | Status:{" "}
-                      {s.status}
-                    </Typography>
-                  </Box>
-
-                  <Button
-                    variant="outlined"
-                    onClick={btnAction}
-                    disabled={btnDisabled}
-                    sx={{ ml: 2 }}
-                  >
-                    {btnText}
-                  </Button>
-                </ListItem>
-              );
-            })}
+                    <Button
+                      variant="outlined"
+                      onClick={btnAction}
+                      disabled={btnDisabled}
+                      sx={{ ml: 2 }}
+                    >
+                      {btnText}
+                    </Button>
+                  </ListItem>
+                );
+              })}
           </List>
         )}
       </Box>

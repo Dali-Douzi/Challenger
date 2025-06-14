@@ -1,18 +1,33 @@
-import React, { useContext } from "react";
+import React from "react";
 import { Navigate } from "react-router-dom";
-import { AuthContext } from "../context/AuthContext";
+import { useAuth } from "../context/AuthContext";
+import { CircularProgress, Box } from "@mui/material";
 
-const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useContext(AuthContext);
+const ProtectedRoute = ({ children, redirectTo = "/login" }) => {
+  const { isAuthenticated, isLoading } = useAuth();
 
-  if (loading) {
-    return <div>Loading…</div>;
+  // Show loading spinner while checking authentication
+  if (isLoading) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
   }
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    return <Navigate to={redirectTo} replace />;
   }
 
+  // Render children if authenticated
   return children;
 };
 

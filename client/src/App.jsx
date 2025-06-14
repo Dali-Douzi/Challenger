@@ -1,54 +1,102 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
 import { ThemeProvider } from "@mui/material/styles";
-import { Box } from "@mui/material";
+import { CssBaseline } from "@mui/material";
 import theme from "./styles/theme";
-
+import { AuthProvider } from "./context/AuthContext";
+import LoginPage from "./pages/Login";
+import SignupPage from "./pages/Signup";
+import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Navbar from "./components/Navbar";
-
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import Dashboard from "./pages/Dashboard";
-import ScrimDashboard from "./pages/ScrimDashboard";
-import EditScrim from "./pages/EditScrim";
-import ScrimRequests from "./pages/ScrimRequests";
-import TeamDashboard from "./pages/TeamDashboard";
-import TeamProfile from "./pages/TeamProfile";
-import CreateTeam from "./pages/CreateTeam";
 import Profile from "./pages/Profile";
-import ChatsPage from "./pages/ChatsPage";
-
+import ScrimDashboard from "./pages/ScrimDashboard";
+import TeamDashboard from "./pages/TeamDashboard";
 import TournamentDashboard from "./pages/TournamentDashboard";
-import CreateTournamentPage from "./pages/CreateTournamentPage";
-import TournamentPage from "./pages/TournamentPage";
-import EditTournamentPage from "./pages/EditTournamentPage";
-import MatchPage from "./pages/MatchPage";
+import CreateTeam from "./pages/CreateTeam";
+import TeamProfile from "./pages/TeamProfile";
 
-function App() {
+const PublicRoute = ({ children }) => {
+  const token = sessionStorage.getItem("token");
+  return !token ? children : <Navigate to="/dashboard" replace />;
+};
+
+const App = () => {
   return (
     <ThemeProvider theme={theme}>
-      <Box
-        sx={{
-          minHeight: "100vh",
-          backgroundColor: theme.palette.background.default,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+      <CssBaseline />
+      <AuthProvider>
         <Router>
           <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-            {/* Protected routes */}
+            <Route
+              path="/login"
+              element={
+                <PublicRoute>
+                  <LoginPage />
+                </PublicRoute>
+              }
+            />
+
+            <Route
+              path="/signup"
+              element={
+                <PublicRoute>
+                  <SignupPage />
+                </PublicRoute>
+              }
+            />
+
             <Route
               path="/dashboard"
               element={
                 <ProtectedRoute>
                   <Navbar />
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/teams"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <TeamDashboard />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/create-team"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <CreateTeam />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/teams/:id"
+              element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <TeamProfile />
                 </ProtectedRoute>
               }
             />
@@ -62,79 +110,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/scrims/edit"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <EditScrim />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/scrims/:scrimId/requests"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <ScrimRequests />
-                </ProtectedRoute>
-              }
-            />
 
-            <Route
-              path="/teams"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <TeamDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/teams/:id"
-              element={
-                <ProtectedRoute>
-                  <TeamProfile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/create-team"
-              element={
-                <ProtectedRoute>
-                  <CreateTeam />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/chats"
-              element={
-                <ProtectedRoute>
-                  <ChatsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/chats/:chatId"
-              element={
-                <ProtectedRoute>
-                  <ChatsPage />
-                </ProtectedRoute>
-              }
-            />
-
-            {/* Tournament routes */}
             <Route
               path="/tournaments"
               element={
@@ -144,57 +120,11 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/tournaments/create"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <CreateTournamentPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/tournaments/:id"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <TournamentPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/matches/:id"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <MatchPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/tournaments/:id/edit"
-              element={
-                <ProtectedRoute>
-                  <Navbar />
-                  <EditTournamentPage />
-                </ProtectedRoute>
-              }
-            />
-
-            {/* 404 fallback */}
-            <Route
-              path="*"
-              element={
-                <Box sx={{ p: 4, textAlign: "center", color: "white" }}>
-                  <h1>404 - Page not found</h1>
-                </Box>
-              }
-            />
           </Routes>
         </Router>
-      </Box>
+      </AuthProvider>
     </ThemeProvider>
   );
-}
+};
 
 export default App;

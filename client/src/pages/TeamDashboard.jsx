@@ -13,36 +13,40 @@ import {
   Paper,
   Button,
 } from "@mui/material";
+import { useAuth } from "../context/AuthContext";
 
 const TeamDashboard = () => {
-  const token = localStorage.getItem("token");
+  const { makeAuthenticatedRequest } = useAuth();
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Extracted fetch function so we can call it on mount and after joining
   const fetchTeams = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("http://localhost:4444/api/teams/my", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
+      const res = await makeAuthenticatedRequest(
+        "http://localhost:4444/api/teams/my"
+      );
+      if (res && res.ok) {
+        const data = await res.json();
+        // Ensure data is always an array
+        const teamsArray = Array.isArray(data) ? data : [];
+        setTeams(teamsArray);
+      } else if (res) {
         const err = await res.json();
         throw new Error(err.message || "Failed to fetch teams");
       }
-      const data = await res.json();
-      setTeams(data);
     } catch (err) {
       console.error("Error fetching teams:", err);
       setError("Error fetching your teams");
+      setTeams([]); // Set to empty array on error
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [makeAuthenticatedRequest]);
 
   // Initial load
   useEffect(() => {
@@ -100,11 +104,11 @@ const TeamDashboard = () => {
           </Typography>
         )}
 
-        {!error && teams.length === 0 && (
-          <Typography>You haven’t created or joined any teams yet.</Typography>
+        {!error && (!Array.isArray(teams) || teams.length === 0) && (
+          <Typography>You haven't created or joined any teams yet.</Typography>
         )}
 
-        {!error && teams.length > 0 && (
+        {!error && Array.isArray(teams) && teams.length > 0 && (
           <Paper>
             <List>
               {teams.map((team) => (
@@ -112,7 +116,9 @@ const TeamDashboard = () => {
                   <ListItemButton component="a" href={`/teams/${team._id}`}>
                     <ListItemText
                       primary={team.name}
-                      secondary={`Game: ${team.game} | Rank: ${team.rank}`}
+                      secondary={`Game: ${
+                        team.game?.name || team.game
+                      } | Rank: ${team.rank}`}
                     />
                   </ListItemButton>
                 </ListItem>

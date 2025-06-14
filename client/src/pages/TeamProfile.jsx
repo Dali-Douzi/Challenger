@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback } from "react";
-import Navbar from "../components/Navbar";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Box,
@@ -35,8 +34,7 @@ const getTeamInitials = (teamName) => {
 const TeamProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
-  const { user } = useAuth();
+  const { user, makeAuthenticatedRequest } = useAuth();
 
   const [team, setTeam] = useState(null);
   const [availableRanks, setAvailableRanks] = useState([]);
@@ -54,23 +52,24 @@ const TeamProfile = () => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`http://localhost:4444/api/teams/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${id}`
+      );
+      if (res && res.ok) {
+        const data = await res.json();
+        setTeam(data);
+        setAvailableRanks(data.availableRanks || []);
+      } else if (res) {
         const errData = await res.json();
         throw new Error(errData.message || "Failed to load team");
       }
-      const data = await res.json();
-      setTeam(data);
-      setAvailableRanks(data.availableRanks || []);
     } catch (err) {
       console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [id, token]);
+  }, [id, makeAuthenticatedRequest]);
 
   useEffect(() => {
     fetchTeam();
@@ -86,7 +85,6 @@ const TeamProfile = () => {
     setLogoPreview("");
   }, [logoFile]);
 
-  // Copy join code to clipboard
   const handleCopyJoinCode = async () => {
     try {
       await navigator.clipboard.writeText(team.teamCode);
@@ -94,7 +92,6 @@ const TeamProfile = () => {
       setTimeout(() => setCopyTooltip("Copy join code"), 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
-      // Fallback for older browsers
       const textArea = document.createElement("textarea");
       textArea.value = team.teamCode;
       document.body.appendChild(textArea);
@@ -110,21 +107,18 @@ const TeamProfile = () => {
   const currentMember = team?.members.find((m) => {
     // If m.user is populated (an object), use m.user._id; otherwise m.user is already an ObjectId/string
     const memberId = m.user?._id ? m.user._id.toString() : m.user.toString();
-    return memberId === user?._id;
+    return memberId === user?.id;
   });
   const currentUserRole = currentMember?.role;
   const isTeamMember = !!currentMember;
 
-  // Check if user can see team code (must be logged in, team member AND owner or manager)
   const canSeeTeamCode =
     user &&
     isTeamMember &&
     (currentUserRole === "owner" || currentUserRole === "manager");
 
-  // Check if user can upload logo (must be logged in, team member AND owner)
   const canUploadLogo = user && isTeamMember && currentUserRole === "owner";
 
-  // Check if user can delete team (must be logged in, team member AND owner)
   const canDeleteTeam = user && isTeamMember && currentUserRole === "owner";
 
   const handleDeleteTeam = async () => {
@@ -136,16 +130,17 @@ const TeamProfile = () => {
       return;
     }
     try {
-      const res = await fetch(`http://localhost:4444/api/teams/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${id}`,
+        {
+          method: "DELETE",
+        }
+      );
+      if (res && !res.ok) {
         const err = await res.json();
         throw new Error(err.message || "Failed to delete team");
       }
-      // Redirect to the user's profile page after deletion
-      navigate("/profile");
+      navigate("/teams");
     } catch (err) {
       console.error(err);
       alert(err.message);
@@ -160,15 +155,15 @@ const TeamProfile = () => {
       const formData = new FormData();
       formData.append("logo", logoFile);
 
-      const res = await fetch(`http://localhost:4444/api/teams/${id}/logo`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${id}/logo`,
+        {
+          method: "PUT",
+          body: formData,
+        }
+      );
 
-      if (!res.ok) {
+      if (res && !res.ok) {
         const error = await res.json();
         throw new Error(error.message || "Failed to upload logo");
       }
@@ -191,19 +186,18 @@ const TeamProfile = () => {
     }
 
     try {
-      const res = await fetch(`http://localhost:4444/api/teams/${id}/logo`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const res = await makeAuthenticatedRequest(
+        `http://localhost:4444/api/teams/${id}/logo`,
+        {
+          method: "DELETE",
+        }
+      );
 
-      if (!res.ok) {
+      if (res && !res.ok) {
         const error = await res.json();
         throw new Error(error.message || "Failed to delete logo");
       }
 
-      // Refresh team data
       await fetchTeam();
     } catch (err) {
       console.error("Logo delete error:", err);
@@ -239,7 +233,6 @@ const TeamProfile = () => {
 
   return (
     <>
-      <Navbar />
       <Container maxWidth="md">
         <Box sx={{ color: "white", p: 4 }}>
           {team.banner && (
@@ -307,7 +300,8 @@ const TeamProfile = () => {
                   </Box>
                 )}
                 <Typography variant="subtitle1" color="textSecondary">
-                  Game: {team.game} | Rank: {team.rank} | Server: {team.server}
+                  Game: {team.game?.name || team.game} | Rank: {team.rank} |
+                  Server: {team.server}
                 </Typography>
 
                 {/* Logo Upload Section - Only for owners */}
@@ -353,20 +347,21 @@ const TeamProfile = () => {
               Members
             </Typography>
             <List>
-              {team.members
-                .filter((member) => member.user) // Filter out members with null user
-                .map((member) => (
-                  <MemberRow
-                    key={member.user._id}
-                    member={member}
-                    teamId={id}
-                    currentUserRole={
-                      user && isTeamMember ? currentUserRole : null
-                    }
-                    availableRanks={availableRanks}
-                    onMemberChange={fetchTeam}
-                  />
-                ))}
+              {Array.isArray(team.members) &&
+                team.members
+                  .filter((member) => member.user) // Filter out members with null user
+                  .map((member) => (
+                    <MemberRow
+                      key={member.user._id}
+                      member={member}
+                      teamId={id}
+                      currentUserRole={
+                        user && isTeamMember ? currentUserRole : null
+                      }
+                      availableRanks={availableRanks}
+                      onMemberChange={fetchTeam}
+                    />
+                  ))}
             </List>
           </Paper>
         </Box>
