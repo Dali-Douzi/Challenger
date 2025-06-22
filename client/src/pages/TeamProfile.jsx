@@ -155,15 +155,15 @@ const TeamProfile = () => {
       const formData = new FormData();
       formData.append("logo", logoFile);
 
-      const res = await makeAuthenticatedRequest(
-        `http://localhost:4444/api/teams/${id}/logo`,
-        {
-          method: "PUT",
-          body: formData,
-        }
-      );
+      // Use fetch directly instead of makeAuthenticatedRequest for FormData
+      const res = await fetch(`http://localhost:4444/api/teams/${id}/logo`, {
+        method: "PUT",
+        credentials: "include", // Include cookies for authentication
+        body: formData,
+        // Don't set Content-Type header - let browser set it with boundary
+      });
 
-      if (res && !res.ok) {
+      if (!res.ok) {
         const error = await res.json();
         throw new Error(error.message || "Failed to upload logo");
       }
@@ -227,9 +227,7 @@ const TeamProfile = () => {
   }
 
   const teamInitials = getTeamInitials(team.name);
-  const logoSrc =
-    logoPreview ||
-    (team.logo ? `http://localhost:4444/${team.logo}?t=${Date.now()}` : null);
+  const logoSrc = logoPreview || team.logo || null;
 
   return (
     <>

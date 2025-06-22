@@ -56,52 +56,18 @@ const avatarUpload = multer({
       cb(null, true);
     } else {
       cb(
-        new Error("Only image files (PNG, JPG, JPEG, WEBP) are allowed!"),
+        new Error(
+          "Only static image files (PNG, JPG, JPEG, WEBP) are allowed!"
+        ),
         false
       );
     }
   },
 });
 
-const generateTokens = (userId) => {
-  const accessToken = jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: "15m",
-  });
-
-  const refreshToken = jwt.sign(
-    { userId },
-    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  return { accessToken, refreshToken };
-};
-
-const getCookieConfig = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-  domain:
-    process.env.NODE_ENV === "production"
-      ? process.env.COOKIE_DOMAIN
-      : undefined,
-});
-
-const deleteOldAvatar = async (avatarUrl) => {
-  try {
-    if (avatarUrl && avatarUrl.includes("cloudinary")) {
-      const publicId = avatarUrl.split("/").pop().split(".")[0];
-      const fullPublicId = `challenger/avatars/${publicId}`;
-
-      const result = await cloudinary.uploader.destroy(fullPublicId);
-      console.log(
-        `Deleted old avatar from Cloudinary: ${fullPublicId}`,
-        result
-      );
-    }
-  } catch (error) {
-    console.error("Error deleting old avatar from Cloudinary:", error);
-  }
+const sanitizeInput = (input) => {
+  if (typeof input !== "string") return input;
+  return input.trim().replace(/[<>]/g, "");
 };
 
 const validateUserChanges = async (userId, changes) => {
@@ -160,18 +126,29 @@ const validateUserChanges = async (userId, changes) => {
   return { isValid: errors.length === 0, errors };
 };
 
-const sanitizeInput = (input) => {
-  if (typeof input !== "string") return input;
-  return input.trim().replace(/[<>]/g, "");
+const generateTokens = (userId) => {
+  const accessToken = jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: "15m",
+  });
+
+  const refreshToken = jwt.sign(
+    { userId },
+    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  return { accessToken, refreshToken };
 };
 
-const sendErrorResponse = (res, status, message, details = null) => {
-  const response = { success: false, message };
-  if (details && process.env.NODE_ENV === "development") {
-    response.details = details;
-  }
-  return res.status(status).json(response);
-};
+const getCookieConfig = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+  domain:
+    process.env.NODE_ENV === "production"
+      ? process.env.COOKIE_DOMAIN
+      : undefined,
+});
 
 const setAuthCookies = (res, accessToken, refreshToken) => {
   const cookieConfig = getCookieConfig();
@@ -193,30 +170,50 @@ const clearAuthCookies = (res) => {
   res.clearCookie("refreshToken", cookieConfig);
 };
 
-// Orphaned cleanup function for post-deletion cleanup
+const sendErrorResponse = (res, status, message, details = null) => {
+  const response = { success: false, message };
+  if (details && process.env.NODE_ENV === "development") {
+    response.details = details;
+  }
+  return res.status(status).json(response);
+};
+
+const deleteOldAvatar = async (avatarUrl) => {
+  try {
+    if (avatarUrl && avatarUrl.includes("cloudinary")) {
+      const publicId = avatarUrl.split("/").pop().split(".")[0];
+      const fullPublicId = `challenger/avatars/${publicId}`;
+
+      const result = await cloudinary.uploader.destroy(fullPublicId);
+      console.log(
+        `Deleted old avatar from Cloudinary: ${fullPublicId}`,
+        result
+      );
+    }
+  } catch (error) {
+    console.error("Error deleting old avatar from Cloudinary:", error);
+  }
+};
+
 const runPostDeletionCleanup = async (verbose = false) => {
   try {
     if (verbose) console.log("🧹 Running post-deletion cleanup...");
 
-    // Import models locally to avoid circular dependencies
     const Team = require("../models/Team");
     const Scrim = require("../models/Scrim");
     const Notification = require("../models/Notification");
     const ScrimChat = require("../models/ScrimChat");
 
-    // Find and delete orphaned teams (those with deleted owners)
     const orphanedTeams = await Team.find({}).populate("owner", "_id");
     let cleanedTeams = 0;
 
     for (const team of orphanedTeams) {
       if (!team.owner) {
-        // Remove from users' teams arrays
         await User.updateMany(
           { teams: team._id },
           { $pull: { teams: team._id } }
         );
 
-        // Delete orphaned scrims where this team was teamA
         const orphanedScrims = await Scrim.find({ teamA: team._id });
         for (const scrim of orphanedScrims) {
           await ScrimChat.deleteMany({ scrim: scrim._id });
@@ -224,7 +221,6 @@ const runPostDeletionCleanup = async (verbose = false) => {
           await Scrim.findByIdAndDelete(scrim._id);
         }
 
-        // Remove team from other scrims' requests
         await Scrim.updateMany(
           { requests: team._id },
           { $pull: { requests: team._id } }
@@ -236,7 +232,6 @@ const runPostDeletionCleanup = async (verbose = false) => {
       }
     }
 
-    // Find and delete orphaned scrims (those with deleted teamA)
     const orphanedScrims = await Scrim.find({}).populate("teamA", "_id");
     let cleanedScrims = 0;
 
@@ -250,16 +245,30 @@ const runPostDeletionCleanup = async (verbose = false) => {
       }
     }
 
+    // Clean any notifications without scrim references (safety net)
+    const orphanedNotifications = await Notification.deleteMany({
+      scrim: { $exists: false },
+    });
+
     if (verbose) {
       console.log(
-        `✅ Post-deletion cleanup completed: ${cleanedTeams} teams, ${cleanedScrims} scrims`
+        `✅ Post-deletion cleanup completed: ${cleanedTeams} teams, ${cleanedScrims} scrims, ${orphanedNotifications.deletedCount} orphaned notifications`
       );
     }
 
-    return { cleanedTeams, cleanedScrims };
+    return {
+      cleanedTeams,
+      cleanedScrims,
+      cleanedOrphanedNotifications: orphanedNotifications.deletedCount,
+    };
   } catch (error) {
     console.error("⚠️ Post-deletion cleanup failed:", error);
-    return { cleanedTeams: 0, cleanedScrims: 0, error: error.message };
+    return {
+      cleanedTeams: 0,
+      cleanedScrims: 0,
+      cleanedOrphanedNotifications: 0,
+      error: error.message,
+    };
   }
 };
 
@@ -317,7 +326,7 @@ router.post("/signup", authLimiter, (req, res) => {
         email,
         password: hashedPassword,
         teams: [],
-        avatar: req.file ? req.file.path : "", // Cloudinary URL
+        avatar: req.file ? req.file.path : "",
       };
 
       const user = new User(userData);
@@ -446,6 +455,63 @@ router.post("/logout", (req, res) => {
     success: true,
     message: "Logged out successfully",
   });
+});
+
+router.get("/profile", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("-password");
+    if (!user) {
+      return sendErrorResponse(res, 404, "User not found");
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar,
+        teams: user.teams,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("Get profile error:", error);
+    sendErrorResponse(
+      res,
+      500,
+      "Server error while fetching profile",
+      error.message
+    );
+  }
+});
+
+router.get("/me", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select("-password");
+    if (!user) {
+      return sendErrorResponse(res, 404, "User not found");
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar,
+        teams: user.teams,
+      },
+    });
+  } catch (error) {
+    console.error("Get user error:", error);
+    sendErrorResponse(
+      res,
+      500,
+      "Server error while fetching user",
+      error.message
+    );
+  }
 });
 
 router.put("/change-email", auth, async (req, res) => {
@@ -641,7 +707,7 @@ router.put("/change-avatar", auth, (req, res) => {
         await deleteOldAvatar(user.avatar);
       }
 
-      user.avatar = req.file.path; // Cloudinary URL
+      user.avatar = req.file.path;
       await user.save();
 
       console.log("Avatar updated successfully:", user.avatar);
@@ -704,7 +770,6 @@ router.delete("/delete-avatar", auth, async (req, res) => {
   }
 });
 
-// User account deletion with orphaned objects cleanup
 router.delete("/delete-account", auth, async (req, res) => {
   try {
     const { currentPassword } = req.body;
@@ -718,13 +783,11 @@ router.delete("/delete-account", auth, async (req, res) => {
       );
     }
 
-    // Find and verify user
     const user = await User.findById(userId);
     if (!user) {
       return sendErrorResponse(res, 404, "User not found");
     }
 
-    // Verify password
     const isPasswordValid = await bcrypt.compare(
       currentPassword,
       user.password
@@ -735,34 +798,27 @@ router.delete("/delete-account", auth, async (req, res) => {
 
     console.log(`🗑️ User deletion initiated: ${user.username} (${user.email})`);
 
-    // Delete old avatar from Cloudinary if exists
     if (user.avatar) {
       await deleteOldAvatar(user.avatar);
     }
 
-    // Import Team model locally to avoid circular dependency
     const Team = require("../models/Team");
 
-    // Remove user from all teams they're a member of
     await Team.updateMany(
       { "members.user": userId },
       { $pull: { members: { user: userId } } }
     );
 
-    // Delete the user account
     await User.findByIdAndDelete(userId);
 
-    // Clear authentication cookies
     clearAuthCookies(res);
 
     console.log(`✅ User account deleted: ${user.username}`);
 
-    // Trigger immediate cleanup of orphaned objects
     try {
       const cleanupResults = await runPostDeletionCleanup(true);
       console.log("✅ Post-deletion cleanup completed:", cleanupResults);
     } catch (cleanupError) {
-      // Don't fail the user deletion if cleanup fails
       console.error("⚠️ Post-deletion cleanup failed:", cleanupError);
     }
 
@@ -776,63 +832,6 @@ router.delete("/delete-account", auth, async (req, res) => {
       res,
       500,
       "Server error while deleting account",
-      error.message
-    );
-  }
-});
-
-router.get("/profile", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select("-password");
-    if (!user) {
-      return sendErrorResponse(res, 404, "User not found");
-    }
-
-    res.json({
-      success: true,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        teams: user.teams,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error("Get profile error:", error);
-    sendErrorResponse(
-      res,
-      500,
-      "Server error while fetching profile",
-      error.message
-    );
-  }
-});
-
-router.get("/me", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select("-password");
-    if (!user) {
-      return sendErrorResponse(res, 404, "User not found");
-    }
-
-    res.json({
-      success: true,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        teams: user.teams,
-      },
-    });
-  } catch (error) {
-    console.error("Get user error:", error);
-    sendErrorResponse(
-      res,
-      500,
-      "Server error while fetching user",
       error.message
     );
   }

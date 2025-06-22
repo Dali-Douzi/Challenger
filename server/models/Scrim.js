@@ -11,6 +11,11 @@ const ScrimSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Team",
     },
+    game: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Game",
+      required: true,
+    },
     format: {
       type: String,
       required: true,

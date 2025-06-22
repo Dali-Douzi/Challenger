@@ -2,7 +2,6 @@ import React, { createContext, useContext, useReducer, useEffect } from "react";
 
 const AuthContext = createContext(null);
 
-// Auth reducer for cleaner state management
 const authReducer = (state, action) => {
   switch (action.type) {
     case "SET_LOADING":
@@ -316,14 +315,13 @@ export const AuthProvider = ({ children }) => {
       const formData = new FormData();
       formData.append("avatar", avatarFile);
 
-      const response = await makeAuthenticatedRequest(
-        "/api/auth/change-avatar",
-        {
-          method: "PUT",
-          headers: {}, // Don't set Content-Type for FormData
-          body: formData,
-        }
-      );
+      // Use fetch directly instead of makeAuthenticatedRequest for FormData
+      const response = await fetch("/api/auth/change-avatar", {
+        method: "PUT",
+        credentials: "include", // Include cookies for authentication
+        body: formData,
+        // Don't set Content-Type header - let browser set it with boundary
+      });
 
       const data = await handleApiResponse(response);
 

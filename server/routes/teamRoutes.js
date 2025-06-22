@@ -11,33 +11,71 @@ const Notification = require("../models/Notification");
 const ScrimChat = require("../models/ScrimChat");
 const protect = require("../middleware/authMiddleware");
 const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
-const logoStorage = multer.diskStorage({
-  destination(req, file, cb) {
-    const uploadDir = "uploads/logos/";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename(req, file, cb) {
-    const uniqueName = `${Date.now()}-${Math.round(
-      Math.random() * 1e9
-    )}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const logoStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "challenger/team-logos",
+    allowed_formats: ["jpg", "png", "jpeg", "webp", "gif"],
+    transformation: [
+      { width: 400, height: 400, crop: "fill" },
+      { quality: "auto", fetch_format: "auto" },
+    ],
+    public_id: (req, file) => {
+      return `team_logo_${req.params.id || Date.now()}_${Math.round(
+        Math.random() * 1e9
+      )}`;
+    },
   },
 });
 
 const logoUpload = multer({
   storage: logoStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter(req, file, cb) {
-    if (!file.mimetype.startsWith("image/")) {
-      return cb(new Error("Only image files are allowed for team logo"));
+    const allowedTypes = [
+      "image/png",
+      "image/jpg",
+      "image/jpeg",
+      "image/webp",
+      "image/gif",
+    ];
+
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(
+        new Error("Only image files (PNG, JPG, JPEG, WEBP, GIF) are allowed!"),
+        false
+      );
     }
-    cb(null, true);
   },
 });
+
+const deleteOldLogo = async (logoUrl) => {
+  try {
+    if (logoUrl && logoUrl.includes("cloudinary")) {
+      const publicId = logoUrl.split("/").pop().split(".")[0];
+      const fullPublicId = `challenger/team-logos/${publicId}`;
+
+      const result = await cloudinary.uploader.destroy(fullPublicId);
+      console.log(
+        `Deleted old team logo from Cloudinary: ${fullPublicId}`,
+        result
+      );
+    }
+  } catch (error) {
+    console.error("Error deleting old team logo from Cloudinary:", error);
+  }
+};
 
 const optionalProtect = (req, res, next) => {
   const token = req.header("Authorization")?.split(" ")[1];
@@ -54,22 +92,18 @@ const optionalProtect = (req, res, next) => {
   next();
 };
 
-// Games endpoint - moved from server.js
 router.get("/games", async (req, res) => {
   try {
     console.log("🎮 Fetching games from database...");
-
-    // Set cache headers for better performance
     res.set({
-      "Cache-Control": "public, max-age=300", // Cache for 5 minutes
+      "Cache-Control": "public, max-age=300",
       ETag: `"games-${Date.now()}"`,
     });
 
-    const games = await Game.find({}).lean(); // Use lean() for better performance
+    const games = await Game.find({}).lean();
     console.log("🎮 Games found:", games.length);
     console.log("🎮 Games data:", games);
 
-    // Return games directly as array for frontend compatibility
     res.json(games);
   } catch (error) {
     console.error("❌ Error fetching games:", error);
@@ -126,7 +160,7 @@ router.post("/create", protect, (req, res) => {
         owner: userId,
         members: [{ user: userId, role: "owner", rank }],
         teamCode: teamCode,
-        logo: req.file ? `uploads/logos/${req.file.filename}` : "",
+        logo: req.file ? req.file.path : "", // Cloudinary URL
       };
 
       const newTeam = new Team(newTeamData);
@@ -235,13 +269,11 @@ router.put("/:id", protect, (req, res) => {
       if (description !== undefined) team.description = description;
 
       if (req.file) {
+        // Delete old logo from Cloudinary if it exists
         if (team.logo) {
-          const oldLogoPath = path.join(__dirname, "../", team.logo);
-          if (fs.existsSync(oldLogoPath)) {
-            fs.unlinkSync(oldLogoPath);
-          }
+          await deleteOldLogo(team.logo);
         }
-        team.logo = `uploads/logos/${req.file.filename}`;
+        team.logo = req.file.path; // Cloudinary URL
       }
 
       await team.save();
@@ -261,7 +293,13 @@ router.put("/:id/logo", protect, (req, res) => {
   logoUpload.single("logo")(req, res, async (err) => {
     if (err) {
       console.error("Logo upload error:", err);
-      return res.status(400).json({ message: err.message });
+
+      const errorMessage =
+        err.code === "LIMIT_FILE_SIZE"
+          ? "File too large. Maximum size is 10MB"
+          : err.message || "Logo upload failed";
+
+      return res.status(400).json({ message: errorMessage });
     }
 
     const teamId = req.params.id;
@@ -280,13 +318,10 @@ router.put("/:id/logo", protect, (req, res) => {
       }
 
       if (team.logo) {
-        const oldLogoPath = path.join(__dirname, "../", team.logo);
-        if (fs.existsSync(oldLogoPath)) {
-          fs.unlinkSync(oldLogoPath);
-        }
+        await deleteOldLogo(team.logo);
       }
 
-      team.logo = `uploads/logos/${req.file.filename}`;
+      team.logo = req.file.path;
       await team.save();
 
       const updatedTeam = await Team.findById(teamId)
@@ -313,10 +348,7 @@ router.delete("/:id/logo", protect, async (req, res) => {
     }
 
     if (team.logo) {
-      const logoPath = path.join(__dirname, "../", team.logo);
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
+      await deleteOldLogo(team.logo);
       team.logo = "";
       await team.save();
     }
@@ -367,7 +399,6 @@ router.post("/:id/join", protect, async (req, res) => {
   }
 });
 
-// Enhanced team deletion with immediate cleanup of orphaned scrims
 router.delete("/:id", protect, async (req, res) => {
   const teamId = req.params.id;
   const userId = req.user.userId;
@@ -382,15 +413,10 @@ router.delete("/:id", protect, async (req, res) => {
 
     console.log(`🗑️ Team deletion initiated: ${team.name} by user ${userId}`);
 
-    // Delete team logo file if exists
     if (team.logo) {
-      const logoPath = path.join(__dirname, "../", team.logo);
-      if (fs.existsSync(logoPath)) {
-        fs.unlinkSync(logoPath);
-      }
+      await deleteOldLogo(team.logo);
     }
 
-    // Remove team from all members' teams arrays
     for (const member of team.members) {
       const memberUser = await User.findById(member.user);
       if (memberUser) {
@@ -401,12 +427,10 @@ router.delete("/:id", protect, async (req, res) => {
       }
     }
 
-    // Delete the team
     await Team.findByIdAndDelete(teamId);
 
     console.log(`✅ Team deleted: ${team.name}`);
 
-    // Immediate cleanup of orphaned scrims where this team was teamA (posting team)
     try {
       console.log("🧹 Cleaning scrims where deleted team was posting team...");
 
@@ -414,14 +438,11 @@ router.delete("/:id", protect, async (req, res) => {
       let cleanedScrims = 0;
 
       for (const scrim of orphanedScrims) {
-        // Delete related data
         await ScrimChat.deleteMany({ scrim: scrim._id });
         await Notification.deleteMany({ scrim: scrim._id });
 
-        // Emit socket event if available
         const io = req.app.get("io");
         if (io) {
-          // Notify all relevant teams that the scrim was deleted
           const allTeams = [
             ...(Array.isArray(scrim.requests)
               ? scrim.requests.map((id) => id.toString())
@@ -443,7 +464,6 @@ router.delete("/:id", protect, async (req, res) => {
         console.log(`🧹 Cleaned orphaned scrim: ${scrim._id}`);
       }
 
-      // Also clean this team from requests arrays of other scrims
       const updatedScrims = await Scrim.updateMany(
         { requests: teamId },
         { $pull: { requests: teamId } }

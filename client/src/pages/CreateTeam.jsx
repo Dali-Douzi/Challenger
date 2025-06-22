@@ -15,7 +15,6 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
-import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 const VisuallyHiddenInput = styled("input")({
@@ -42,7 +41,6 @@ const getTeamInitials = (teamName) => {
 
 const CreateTeam = () => {
   const navigate = useNavigate();
-  const { makeAuthenticatedRequest } = useAuth();
 
   const [name, setName] = useState("");
   const [game, setGame] = useState("");
@@ -135,12 +133,10 @@ const CreateTeam = () => {
       if (description) formData.append("description", description);
       if (logoFile) formData.append("logo", logoFile);
 
-      // Use fetch directly instead of makeAuthenticatedRequest for FormData
       const response = await fetch("http://localhost:4444/api/teams/create", {
         method: "POST",
-        credentials: "include", // Include cookies for authentication
+        credentials: "include",
         body: formData,
-        // Don't set Content-Type header - let browser set it with boundary
       });
 
       if (response && response.ok) {

@@ -6,18 +6,23 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const compression = require("compression");
+const session = require("express-session");
+const MongoStore = require("connect-mongo");
 const cron = require("node-cron");
 require("dotenv").config();
 
 const authRoutes = require("./routes/authRoutes");
+const oauthRoutes = require("./routes/oauthRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const scrimRoutes = require("./routes/scrimRoutes");
 const seedGames = require("./config/dbSeeder");
 
 const app = express();
 const PORT = process.env.PORT || 4444;
+let cleanupTask = null;
 
-// Orphaned Objects Cleanup System
+const SCRIM_RETENTION_DAYS = parseInt(process.env.SCRIM_RETENTION_DAYS) || 90;
+
 class OrphanedCleanup {
   static async cleanup(options = { dryRun: false, verbose: false }) {
     const { dryRun, verbose } = options;
@@ -26,12 +31,14 @@ class OrphanedCleanup {
       orphanedScrims: [],
       cleanedNotifications: 0,
       cleanedChats: 0,
+      cleanedOldScrims: 0,
       errors: [],
     };
 
     if (verbose) {
-      console.log("🧹 Starting orphaned objects cleanup...");
+      console.log("🧹 Starting cleanup...");
       console.log(`📋 Mode: ${dryRun ? "DRY RUN" : "LIVE CLEANUP"}`);
+      console.log(`📅 Scrim retention: ${SCRIM_RETENTION_DAYS} days`);
     }
 
     try {
@@ -69,13 +76,11 @@ class OrphanedCleanup {
           });
 
           if (!dryRun) {
-            // Remove from users' teams arrays
             await User.updateMany(
               { teams: team._id },
               { $pull: { teams: team._id } }
             );
 
-            // Delete orphaned scrims where this team was teamA
             const orphanedScrims = await Scrim.find({ teamA: team._id });
             for (const scrim of orphanedScrims) {
               await ScrimChat.deleteMany({ scrim: scrim._id });
@@ -83,13 +88,11 @@ class OrphanedCleanup {
               await Scrim.findByIdAndDelete(scrim._id);
             }
 
-            // Remove team from other scrims' requests
             await Scrim.updateMany(
               { requests: team._id },
               { $pull: { requests: team._id } }
             );
 
-            // Delete team
             await Team.findByIdAndDelete(team._id);
           }
 
@@ -112,7 +115,6 @@ class OrphanedCleanup {
         let isOrphaned = false;
         let reason = "";
 
-        // Only check teamA (posting team) - if teamA is deleted, scrim is orphaned
         if (!scrim.teamA) {
           isOrphaned = true;
           reason = "Posting team (teamA) deleted";
@@ -126,14 +128,12 @@ class OrphanedCleanup {
           });
 
           if (!dryRun) {
-            // Delete related chat and notifications
             await ScrimChat.deleteMany({ scrim: scrim._id });
             const deletedNotifications = await Notification.deleteMany({
               scrim: scrim._id,
             });
             results.cleanedNotifications += deletedNotifications.deletedCount;
 
-            // Delete scrim
             await Scrim.findByIdAndDelete(scrim._id);
           }
 
@@ -145,7 +145,6 @@ class OrphanedCleanup {
             );
           }
         } else {
-          // Clean up requests array from deleted teams (but don't delete scrim)
           if (scrim.requests && scrim.requests.length > 0) {
             const validRequests = [];
             for (const teamId of scrim.requests) {
@@ -166,36 +165,52 @@ class OrphanedCleanup {
         }
       }
 
-      // 3. Clean orphaned notifications and chats
+      // 3. Clean old scrims and all related data (90+ days old)
+      const scrimCutoff = new Date(
+        Date.now() - SCRIM_RETENTION_DAYS * 24 * 60 * 60 * 1000
+      );
+
+      const oldScrims = await Scrim.find({
+        createdAt: { $lt: scrimCutoff },
+      });
+
       if (!dryRun) {
-        const orphanedNotifications = await Notification.find({})
-          .populate("team", "_id")
-          .populate("scrim", "_id");
-
-        for (const notification of orphanedNotifications) {
-          if (
-            !notification.team ||
-            (notification.scrim && !notification.scrim)
-          ) {
-            await Notification.findByIdAndDelete(notification._id);
-            results.cleanedNotifications++;
-          }
+        for (const scrim of oldScrims) {
+          await ScrimChat.deleteMany({ scrim: scrim._id });
+          await Notification.deleteMany({ scrim: scrim._id });
         }
 
-        const orphanedChats = await ScrimChat.find({}).populate("scrim", "_id");
-        for (const chat of orphanedChats) {
-          if (!chat.scrim) {
-            await ScrimChat.findByIdAndDelete(chat._id);
-            results.cleanedChats++;
-          }
-        }
+        const deletedOldScrims = await Scrim.deleteMany({
+          createdAt: { $lt: scrimCutoff },
+        });
+        results.cleanedOldScrims = deletedOldScrims.deletedCount;
+      } else {
+        results.cleanedOldScrims = oldScrims.length;
+      }
+
+      // 4. Clean any remaining orphaned notifications and chats (safety net)
+      if (!dryRun) {
+        const orphanedNotifications = await Notification.deleteMany({
+          scrim: { $exists: false },
+        });
+        results.cleanedNotifications += orphanedNotifications.deletedCount;
+
+        const orphanedChats = await ScrimChat.deleteMany({
+          scrim: { $exists: false },
+        });
+        results.cleanedChats += orphanedChats.deletedCount;
       }
 
       if (verbose) {
         console.log("✅ Cleanup completed successfully");
+        console.log("📊 Cleanup Results:");
+        console.log(`   • Orphaned Teams: ${results.orphanedTeams.length}`);
+        console.log(`   • Orphaned Scrims: ${results.orphanedScrims.length}`);
+        console.log(`   • Old Scrims (90+ days): ${results.cleanedOldScrims}`);
         console.log(
-          `📊 Teams: ${results.orphanedTeams.length}, Scrims: ${results.orphanedScrims.length}`
+          `   • Orphaned Notifications: ${results.cleanedNotifications}`
         );
+        console.log(`   • Orphaned Chats: ${results.cleanedChats}`);
       }
 
       return results;
@@ -207,32 +222,34 @@ class OrphanedCleanup {
   }
 }
 
-// Cleanup scheduler
-let cleanupTask = null;
-
 const startCleanupScheduler = () => {
   if (cleanupTask) {
     console.log("⚠️ Cleanup scheduler already running");
     return;
   }
 
-  // Schedule daily at 2:00 AM UTC
   cleanupTask = cron.schedule(
     "0 2 * * *",
     async () => {
       try {
-        console.log("🧹 Running scheduled orphaned objects cleanup...");
+        console.log("🧹 Running scheduled comprehensive cleanup...");
         const results = await OrphanedCleanup.cleanup({
           dryRun: false,
           verbose: true,
         });
 
-        if (
-          results.orphanedTeams.length > 0 ||
-          results.orphanedScrims.length > 0
-        ) {
+        const totalCleaned =
+          results.orphanedTeams.length +
+          results.orphanedScrims.length +
+          results.cleanedOldScrims;
+
+        if (totalCleaned > 0) {
           console.log(
-            `📊 Scheduled cleanup: ${results.orphanedTeams.length} teams, ${results.orphanedScrims.length} scrims removed`
+            `📊 Scheduled cleanup completed: ${totalCleaned} items removed`
+          );
+        } else {
+          console.log(
+            "✨ Scheduled cleanup completed: No items needed removal"
           );
         }
       } catch (error) {
@@ -246,17 +263,76 @@ const startCleanupScheduler = () => {
   );
 
   console.log("🕐 Cleanup scheduler started - daily at 2:00 AM UTC");
+  console.log(`📅 Scrim retention: ${SCRIM_RETENTION_DAYS} days`);
 };
 
-// Trust proxy for accurate client IPs behind reverse proxy
+const gracefulShutdown = (signal) => {
+  console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
+
+  if (cleanupTask) {
+    cleanupTask.stop();
+    console.log("🧹 Cleanup scheduler stopped");
+  }
+
+  const server = app.listen(PORT);
+  server.close(() => {
+    console.log("🔌 HTTP server closed");
+
+    mongoose.connection.close(() => {
+      console.log("🍃 MongoDB connection closed");
+      console.log("👋 Process terminated gracefully");
+      process.exit(0);
+    });
+  });
+
+  setTimeout(() => {
+    console.error(
+      "⚠️ Could not close connections in time, forcefully shutting down"
+    );
+    process.exit(1);
+  }, 30000);
+};
+
+const connectDB = async () => {
+  try {
+    const mongoOptions = {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      family: 4,
+    };
+
+    const conn = await mongoose.connect(
+      process.env.MONGO_URI || "mongodb://localhost:27017/challenger",
+      mongoOptions
+    );
+
+    console.log(`🍃 MongoDB connected successfully: ${conn.connection.host}`);
+
+    try {
+      await seedGames();
+      console.log("📊 Database seeding completed");
+    } catch (error) {
+      if (error.message.includes("already exists") || error.code === 11000) {
+        console.log("📊 Database already seeded, skipping");
+      } else {
+        console.error("❌ Error seeding database:", error);
+      }
+    }
+
+    startCleanupScheduler();
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error);
+    process.exit(1);
+  }
+};
+
 if (process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
 
-// Compression middleware for better performance
 app.use(compression());
 
-// Security middleware
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -272,13 +348,35 @@ app.use(
   })
 );
 
-// Cookie parser middleware (required for production auth)
 app.use(cookieParser());
 
-// General rate limiting
+// Session middleware for OAuth (must be before passport)
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || process.env.JWT_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGO_URI || "mongodb://localhost:27017/challenger",
+      touchAfter: 24 * 3600, // lazy session update
+    }),
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    },
+  })
+);
+
+// Initialize passport after session
+const passport = require("./config/passport");
+app.use(passport.initialize());
+app.use(passport.session());
+
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: {
     success: false,
     message: "Too many requests from this IP, please try again later.",
@@ -286,23 +384,20 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for static files and health checks
     return req.url.startsWith("/uploads") || req.url === "/health";
   },
 });
 
 app.use(generalLimiter);
 
-// CORS configuration for production
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, etc.)
     if (!origin) return callback(null, true);
 
     const allowedOrigins = [
       process.env.CLIENT_URL,
-      "http://localhost:5173", // Development
-      "http://localhost:3000", // Alternative development port
+      "http://localhost:5173",
+      "http://localhost:3000",
     ].filter(Boolean);
 
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -311,65 +406,26 @@ const corsOptions = {
       callback(new Error("Not allowed by CORS"));
     }
   },
-  credentials: true, // Required for cookies
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  optionsSuccessStatus: 200, // For legacy browser support
+  optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
 
-// Body parsing middleware
 app.use(
   express.json({
     limit: "10mb",
     verify: (req, res, buf) => {
-      // Store raw body for webhook verification if needed
       req.rawBody = buf;
     },
   })
 );
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Database connection with improved error handling
-const connectDB = async () => {
-  try {
-    const mongoOptions = {
-      maxPoolSize: 10, // Maintain up to 10 socket connections
-      serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
-      socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-      family: 4, // Use IPv4, skip trying IPv6
-    };
-
-    const conn = await mongoose.connect(
-      process.env.MONGO_URI || "mongodb://localhost:27017/challenger",
-      mongoOptions
-    );
-
-    console.log(`🍃 MongoDB connected successfully: ${conn.connection.host}`);
-
-    // Seed games after successful connection (only in development)
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        await seedGames();
-        console.log("📊 Database seeding completed");
-      } catch (error) {
-        console.error("❌ Error seeding database:", error);
-      }
-    }
-
-    // Start cleanup scheduler
-    startCleanupScheduler();
-  } catch (error) {
-    console.error("❌ MongoDB connection error:", error);
-    process.exit(1);
-  }
-};
-
-// Initialize database connection
 connectDB();
 
-// Health check endpoint with cleanup status
 app.get("/health", async (req, res) => {
   const healthCheck = {
     success: true,
@@ -383,34 +439,54 @@ app.get("/health", async (req, res) => {
       mongoose.connection.readyState === 1 ? "connected" : "disconnected",
   };
 
-  // Add cleanup scheduler status
   try {
     healthCheck.cleanupScheduler = {
       isScheduled: !!cleanupTask,
       schedule: "Daily at 2:00 AM UTC",
+      scrimRetentionDays: SCRIM_RETENTION_DAYS,
+    };
+
+    healthCheck.oauthProviders = {
+      google: !!(
+        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ),
+      discord: !!(
+        process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET
+      ),
+      twitch: !!(
+        process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET
+      ),
     };
   } catch (error) {
     healthCheck.cleanupScheduler = { error: "Failed to get status" };
   }
 
-  // Check database collections count
   try {
-    const [usersCount, teamsCount, scrimsCount] = await Promise.all([
+    const [
+      usersCount,
+      teamsCount,
+      scrimsCount,
+      notificationsCount,
+      chatsCount,
+    ] = await Promise.all([
       mongoose.model("User").countDocuments(),
       mongoose.model("Team").countDocuments(),
       mongoose.model("Scrim").countDocuments(),
+      mongoose.model("Notification").countDocuments(),
+      mongoose.model("ScrimChat").countDocuments(),
     ]);
 
     healthCheck.database = {
       users: usersCount,
       teams: teamsCount,
       scrims: scrimsCount,
+      notifications: notificationsCount,
+      chatMessages: chatsCount,
     };
   } catch (error) {
     healthCheck.database = { error: "Failed to get counts" };
   }
 
-  // Check if we're in production and have required env vars
   if (process.env.NODE_ENV === "production") {
     const requiredEnvVars = [
       "JWT_SECRET",
@@ -435,18 +511,99 @@ app.get("/health", async (req, res) => {
   res.json(healthCheck);
 });
 
-// API routes
+app.get("/", (req, res) => {
+  res.json({
+    message: "Challenger API is running!",
+    version: "2.1.0",
+    features: [
+      "Cookie-based authentication",
+      "OAuth integration (Google, Discord, Twitch)",
+      "Cloudinary file storage",
+      "Rate limiting",
+      "Security headers",
+      "Auto token refresh",
+      "Automatic data cleanup",
+    ],
+    endpoints: [
+      "/api/auth",
+      "/api/auth/google",
+      "/api/auth/discord",
+      "/api/auth/twitch",
+      "/api/teams",
+      "/api/scrims",
+      "/api/teams/games",
+      "/api/cleanup",
+      "/health",
+    ],
+    scrimRetentionDays: SCRIM_RETENTION_DAYS,
+  });
+});
+
+app.get("/api/test", (req, res) => {
+  res.json({
+    success: true,
+    message: "Server is working!",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
+    features: {
+      cookies: !!req.cookies,
+      cors: true,
+      security: true,
+      compression: true,
+      cleanup: !!cleanupTask,
+      oauth: {
+        google: !!(
+          process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        ),
+        discord: !!(
+          process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET
+        ),
+        twitch: !!(
+          process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET
+        ),
+      },
+    },
+    scrimRetentionDays: SCRIM_RETENTION_DAYS,
+  });
+});
+
+app.get("/api/seed-games", async (req, res) => {
+  try {
+    await seedGames();
+    res.json({
+      success: true,
+      message: "Games seeded successfully",
+    });
+  } catch (error) {
+    if (error.message.includes("already exists") || error.code === 11000) {
+      res.json({
+        success: true,
+        message: "Games already seeded",
+      });
+    } else {
+      console.error("❌ Seeding error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Seeding failed",
+        error: error.message,
+      });
+    }
+  }
+});
+
+// Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/auth", oauthRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/scrims", scrimRoutes);
 
-// Cleanup routes
 app.get("/api/cleanup/status", async (req, res) => {
   try {
     const status = {
       isScheduled: !!cleanupTask,
       schedule: "Daily at 2:00 AM UTC",
       lastRun: "Check server logs",
+      scrimRetentionDays: SCRIM_RETENTION_DAYS,
     };
     res.json({ success: true, data: status });
   } catch (error) {
@@ -466,15 +623,14 @@ app.post("/api/cleanup/dry-run", async (req, res) => {
       success: true,
       message: "Dry run completed - no changes made",
       data: results,
+      scrimRetentionDays: SCRIM_RETENTION_DAYS,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Cleanup dry run failed",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Cleanup dry run failed",
+      error: error.message,
+    });
   }
 });
 
@@ -488,85 +644,17 @@ app.post("/api/cleanup/run", async (req, res) => {
       success: true,
       message: "Manual cleanup completed",
       data: results,
+      scrimRetentionDays: SCRIM_RETENTION_DAYS,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Manual cleanup failed",
-        error: error.message,
-      });
-  }
-});
-
-// Root endpoint
-app.get("/", (req, res) => {
-  res.json({
-    message: "Challenger API is running!",
-    version: "2.0.0",
-    features: [
-      "Cookie-based authentication",
-      "Cloudinary file storage",
-      "Rate limiting",
-      "Security headers",
-      "Auto token refresh",
-      "Orphaned objects cleanup",
-    ],
-    endpoints: [
-      "/api/auth",
-      "/api/teams",
-      "/api/scrims",
-      "/api/teams/games",
-      "/api/cleanup",
-      "/health",
-    ],
-  });
-});
-
-// Manual seeding endpoint (development only)
-app.get("/api/seed-games", async (req, res) => {
-  if (process.env.NODE_ENV === "production") {
-    return res.status(403).json({
-      success: false,
-      message: "Seeding is not allowed in production",
-    });
-  }
-
-  try {
-    await seedGames();
-    res.json({
-      success: true,
-      message: "Games seeded successfully",
-    });
-  } catch (error) {
-    console.error("❌ Seeding error:", error);
     res.status(500).json({
       success: false,
-      message: "Seeding failed",
+      message: "Manual cleanup failed",
       error: error.message,
     });
   }
 });
 
-// Test endpoint
-app.get("/api/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "Server is working!",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
-    features: {
-      cookies: !!req.cookies,
-      cors: true,
-      security: true,
-      compression: true,
-      cleanup: !!cleanupTask,
-    },
-  });
-});
-
-// Global error handler
 app.use((err, req, res, next) => {
   console.error("🚨 Global error handler:", {
     error: err.message,
@@ -577,7 +665,6 @@ app.use((err, req, res, next) => {
     userAgent: req.get("User-Agent"),
   });
 
-  // CORS error
   if (err.message === "Not allowed by CORS") {
     return res.status(403).json({
       success: false,
@@ -585,7 +672,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Mongoose validation error
   if (err.name === "ValidationError") {
     const errors = Object.values(err.errors).map((e) => e.message);
     return res.status(400).json({
@@ -595,7 +681,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Mongoose duplicate key error
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
     return res.status(400).json({
@@ -604,7 +689,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // JWT errors
   if (err.name === "JsonWebTokenError") {
     return res.status(401).json({
       success: false,
@@ -619,7 +703,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Multer errors (file upload)
   if (err.code === "LIMIT_FILE_SIZE") {
     return res.status(400).json({
       success: false,
@@ -627,7 +710,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Rate limit errors
   if (err.status === 429) {
     return res.status(429).json({
       success: false,
@@ -635,7 +717,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Default error
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal server error",
@@ -646,7 +727,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler for unknown routes
 app.use("*", (req, res) => {
   console.log(`🔍 404 - Route not found: ${req.method} ${req.originalUrl}`);
 
@@ -667,48 +747,19 @@ app.use("*", (req, res) => {
       "POST /api/auth/refresh",
       "DELETE /api/auth/delete-account",
       "GET /api/auth/me",
+      "GET /api/auth/google",
+      "GET /api/auth/discord",
+      "GET /api/auth/twitch",
+      "GET /api/auth/linked-accounts",
+      "DELETE /api/auth/unlink/:provider",
       "GET /api/teams/my",
-      "POST /api/auth/login",
     ],
   });
 });
 
-// Graceful shutdown handlers
-const gracefulShutdown = (signal) => {
-  console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
-
-  // Stop cleanup scheduler
-  if (cleanupTask) {
-    cleanupTask.stop();
-    console.log("🧹 Cleanup scheduler stopped");
-  }
-
-  // Close server
-  const server = app.listen(PORT);
-  server.close(() => {
-    console.log("🔌 HTTP server closed");
-
-    // Close database connection
-    mongoose.connection.close(() => {
-      console.log("🍃 MongoDB connection closed");
-      console.log("👋 Process terminated gracefully");
-      process.exit(0);
-    });
-  });
-
-  // Force close after 30 seconds
-  setTimeout(() => {
-    console.error(
-      "⚠️ Could not close connections in time, forcefully shutting down"
-    );
-    process.exit(1);
-  }, 30000);
-};
-
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// Handle uncaught exceptions
 process.on("uncaughtException", (err) => {
   console.error("💥 Uncaught Exception:", err);
   gracefulShutdown("uncaughtException");
@@ -719,21 +770,37 @@ process.on("unhandledRejection", (reason, promise) => {
   gracefulShutdown("unhandledRejection");
 });
 
-// Start server
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(`🔐 Authentication: Cookie-based`);
+  console.log(`🔐 Authentication: Cookie-based + OAuth`);
   console.log(`☁️ File Storage: Cloudinary`);
   console.log(`🛡️ Security: Enabled`);
-  console.log(`🧹 Cleanup Scheduler: Enabled`);
+  console.log(`🧹 Cleanup: Enabled (${SCRIM_RETENTION_DAYS} day retention)`);
   console.log("📍 Registered routes:");
   console.log("   • Auth routes: /api/auth");
+  console.log(
+    "   • OAuth routes: /api/auth/google, /api/auth/discord, /api/auth/twitch"
+  );
   console.log("   • Team routes: /api/teams");
   console.log("   • Scrim routes: /api/scrims");
   console.log("   • Cleanup routes: /api/cleanup");
   console.log("   • Games route: /api/games");
   console.log("   • Health check: /health");
+
+  const enabledProviders = [];
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    enabledProviders.push("Google");
+  if (process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET)
+    enabledProviders.push("Discord");
+  if (process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET)
+    enabledProviders.push("Twitch");
+
+  if (enabledProviders.length > 0) {
+    console.log(`🔗 OAuth Providers: ${enabledProviders.join(", ")}`);
+  } else {
+    console.log("⚠️ No OAuth providers configured");
+  }
 
   if (process.env.NODE_ENV === "production") {
     console.log("🔥 Production mode - optimizations enabled");
@@ -742,7 +809,6 @@ const server = app.listen(PORT, () => {
   }
 });
 
-// Set server timeout
-server.timeout = 30000; // 30 seconds
+server.timeout = 30000;
 
 module.exports = app;

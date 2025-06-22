@@ -178,7 +178,7 @@ const Navbar = () => {
             aria-expanded={open ? "true" : undefined}
           >
             <Avatar
-              src={user?.avatar ? `/${user.avatar}` : undefined}
+              src={user?.avatar || undefined}
               sx={{
                 width: 32,
                 height: 32,

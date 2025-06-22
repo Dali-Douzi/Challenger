@@ -20,6 +20,8 @@ import TeamDashboard from "./pages/TeamDashboard";
 import TournamentDashboard from "./pages/TournamentDashboard";
 import CreateTeam from "./pages/CreateTeam";
 import TeamProfile from "./pages/TeamProfile";
+import AuthSuccess from "./pages/AuthSuccess";
+import AuthError from "./pages/AuthError";
 
 const PublicRoute = ({ children }) => {
   const token = sessionStorage.getItem("token");
@@ -52,6 +54,10 @@ const App = () => {
                 </PublicRoute>
               }
             />
+
+            <Route path="/auth/success" element={<AuthSuccess />} />
+
+            <Route path="/auth/error" element={<AuthError />} />
 
             <Route
               path="/dashboard"
