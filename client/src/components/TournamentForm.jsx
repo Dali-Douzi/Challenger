@@ -9,7 +9,7 @@ import {
   CircularProgress,
 } from "@mui/material";
 import { Add, Delete } from "@mui/icons-material";
-import api from "../utils/api"; // ✅ Use authenticated API
+import axios from "axios";
 
 /**
  * @typedef {Object} Phase
@@ -53,7 +53,7 @@ const TournamentForm = ({ initialData = {}, onSubmit }) => {
   useEffect(() => {
     const fetchGames = async () => {
       try {
-        const { data } = await api.get("/games"); // ✅ Using api instead of axios
+        const { data } = await axios.get("/games"); // ✅ Using api instead of axios
         setGames(data);
       } catch (err) {
         setGamesError(err.response?.data?.message || err.message);

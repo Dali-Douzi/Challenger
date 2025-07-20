@@ -1,6 +1,7 @@
 const express = require("express");
 const passport = require("../config/passport");
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 const router = express.Router();
 
 // Helper function to generate tokens and set cookies
@@ -38,6 +39,11 @@ const generateTokensAndSetCookies = (user, res) => {
   return { accessToken, refreshToken };
 };
 
+// Get frontend URL
+const getFrontendUrl = () => {
+  return process.env.CLIENT_URL || "http://localhost:5173";
+};
+
 // Google OAuth routes
 router.get(
   "/google",
@@ -51,18 +57,16 @@ router.get(
     try {
       if (!req.user) {
         return res.redirect(
-          `${process.env.CLIENT_URL}/auth/error?message=Authentication failed`
+          `${getFrontendUrl()}/auth/error?error=Authentication failed`
         );
       }
 
       generateTokensAndSetCookies(req.user, res);
-
-      // Redirect to frontend success page
-      res.redirect(`${process.env.CLIENT_URL}/auth/success`);
+      res.redirect(`${getFrontendUrl()}/auth/success`);
     } catch (error) {
       console.error("Google OAuth callback error:", error);
       res.redirect(
-        `${process.env.CLIENT_URL}/auth/error?message=Token generation failed`
+        `${getFrontendUrl()}/auth/error?error=Token generation failed`
       );
     }
   }
@@ -78,16 +82,16 @@ router.get(
     try {
       if (!req.user) {
         return res.redirect(
-          `${process.env.CLIENT_URL}/auth/error?message=Authentication failed`
+          `${getFrontendUrl()}/auth/error?error=Authentication failed`
         );
       }
 
       generateTokensAndSetCookies(req.user, res);
-      res.redirect(`${process.env.CLIENT_URL}/auth/success`);
+      res.redirect(`${getFrontendUrl()}/auth/success`);
     } catch (error) {
       console.error("Discord OAuth callback error:", error);
       res.redirect(
-        `${process.env.CLIENT_URL}/auth/error?message=Token generation failed`
+        `${getFrontendUrl()}/auth/error?error=Token generation failed`
       );
     }
   }
@@ -106,16 +110,16 @@ router.get(
     try {
       if (!req.user) {
         return res.redirect(
-          `${process.env.CLIENT_URL}/auth/error?message=Authentication failed`
+          `${getFrontendUrl()}/auth/error?error=Authentication failed`
         );
       }
 
       generateTokensAndSetCookies(req.user, res);
-      res.redirect(`${process.env.CLIENT_URL}/auth/success`);
+      res.redirect(`${getFrontendUrl()}/auth/success`);
     } catch (error) {
       console.error("Twitch OAuth callback error:", error);
       res.redirect(
-        `${process.env.CLIENT_URL}/auth/error?message=Token generation failed`
+        `${getFrontendUrl()}/auth/error?error=Token generation failed`
       );
     }
   }

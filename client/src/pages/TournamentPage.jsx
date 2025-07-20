@@ -30,7 +30,6 @@ import { useAuth } from "../context/AuthContext";
 import useMyTeams from "../hooks/useMyTeams";
 import ManageTeams from "../components/ManageTeams";
 import ParticipantsSection from "../components/ParticipantsSection";
-import Bracket from "../components/Bracket";
 import ControlsSection from "../components/ControlsSection";
 
 import moment from "moment";
@@ -42,14 +41,14 @@ import EditIcon from "@mui/icons-material/Edit";
 import GroupAddIcon from "@mui/icons-material/GroupAdd";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
+import AccountTreeIcon from "@mui/icons-material/AccountTree";
 
 const TournamentPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAuth();
-  const { tournament, matchesByPhase, loading, error, refresh } =
-    useTournament(id);
+  const { tournament, loading, error, refresh } = useTournament(id);
   const {
     teams: myTeams,
     loading: loadingMyTeams,
@@ -59,7 +58,6 @@ const TournamentPage = () => {
   const [manageTeamsModalOpen, setManageTeamsModalOpen] = useState(false);
   const [pageError, setPageError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [bracketUpdateLoading, setBracketUpdateLoading] = useState(false);
   const [joinTeamModalOpen, setJoinTeamModalOpen] = useState(false);
 
   useEffect(() => {
@@ -152,130 +150,6 @@ const TournamentPage = () => {
     if (myTeamsError) setPageError(myTeamsError);
   }, [error, myTeamsError]);
 
-  const handleBracketUpdate = async (updateInfo) => {
-    const { phaseIndex, slot, teamId, position } = updateInfo;
-
-    if (
-      typeof phaseIndex !== "number" ||
-      typeof slot !== "number" ||
-      !teamId ||
-      !position
-    ) {
-      setPageError("Invalid data for bracket update. Please try again.");
-      return;
-    }
-
-    if (tournament.status !== "BRACKET_LOCKED") {
-      setPageError(
-        `Cannot update bracket when tournament status is "${tournament.status}". Bracket must be locked first.`
-      );
-      return;
-    }
-
-    if (!isOrganizer) {
-      setPageError("Only tournament organizers can update the bracket.");
-      return;
-    }
-
-    setBracketUpdateLoading(true);
-    setPageError("");
-
-    try {
-      const teamExists = tournament.teams.some((team) => team._id === teamId);
-      if (!teamExists) {
-        throw new Error("Selected team is not part of this tournament");
-      }
-
-      if (!tournament.phases[phaseIndex]) {
-        throw new Error(`Invalid phase index: ${phaseIndex}`);
-      }
-
-      const targetMatch = (matchesByPhase[phaseIndex] || []).find(
-        (m) => (m.matchNumber || m.slot) === slot
-      );
-      if (!targetMatch) {
-        throw new Error(
-          `Match not found for phase ${phaseIndex}, slot ${slot}`
-        );
-      }
-
-      if (targetMatch.status === "COMPLETED") {
-        throw new Error("Cannot modify completed matches");
-      }
-
-      if (
-        position === "A" &&
-        targetMatch.teamB &&
-        targetMatch.teamB._id === teamId
-      ) {
-        throw new Error("Cannot place the same team in both slots of a match");
-      }
-      if (
-        position === "B" &&
-        targetMatch.teamA &&
-        targetMatch.teamA._id === teamId
-      ) {
-        throw new Error("Cannot place the same team in both slots of a match");
-      }
-
-      const currentPhaseMatches = matchesByPhase[phaseIndex] || [];
-      const teamAlreadyPlaced = currentPhaseMatches.some((match) => {
-        if (match.slot === slot) return false;
-        return (
-          (match.teamA && match.teamA._id === teamId) ||
-          (match.teamB && match.teamB._id === teamId)
-        );
-      });
-
-      if (teamAlreadyPlaced) {
-        throw new Error(
-          "Team is already placed in another match in this phase"
-        );
-      }
-
-      let matchChanges = { slot };
-
-      if (position === "A") {
-        matchChanges.teamA = teamId;
-      } else if (position === "B") {
-        matchChanges.teamB = teamId;
-      } else {
-        throw new Error("Invalid position: must be 'A' or 'B'");
-      }
-
-      const payload = {
-        phaseIndex,
-        matches: [matchChanges],
-      };
-
-      await axios.put(`/tournaments/${id}/bracket`, payload);
-
-      const teamName =
-        tournament.teams.find((t) => t._id === teamId)?.name || "Team";
-      setSuccessMessage(
-        `${teamName} placed in Match ${slot} position ${position}`
-      );
-
-      await refresh();
-    } catch (err) {
-      if (err.response?.status === 400) {
-        setPageError(
-          err.response.data.message || "Invalid bracket update request"
-        );
-      } else if (err.response?.status === 403) {
-        setPageError("Access denied. Only organizers can update brackets.");
-      } else if (err.response?.status === 404) {
-        setPageError("Tournament or match not found");
-      } else if (err.message) {
-        setPageError(err.message);
-      } else {
-        setPageError("Failed to update bracket. Please try again.");
-      }
-    } finally {
-      setBracketUpdateLoading(false);
-    }
-  };
-
   const handleTournamentAction = async () => {
     setPageError("");
     setSuccessMessage("");
@@ -293,6 +167,10 @@ const TournamentPage = () => {
 
   const handleCloseError = () => {
     setPageError("");
+  };
+
+  const canViewBracket = () => {
+    return tournament && tournament.status !== "REGISTRATION_OPEN";
   };
 
   if (loading || (currentUser && loadingMyTeams)) {
@@ -344,7 +222,6 @@ const TournamentPage = () => {
 
   return (
     <Container sx={{ py: 4, color: "white" }}>
-      {/* Success Snackbar */}
       <Snackbar
         open={!!successMessage}
         autoHideDuration={4000}
@@ -361,7 +238,6 @@ const TournamentPage = () => {
         </Alert>
       </Snackbar>
 
-      {/* Error Display */}
       {pageError && (
         <Alert
           severity="error"
@@ -370,16 +246,6 @@ const TournamentPage = () => {
           icon={<ErrorIcon />}
         >
           {pageError}
-        </Alert>
-      )}
-
-      {/* Loading Overlay for Bracket Updates */}
-      {bracketUpdateLoading && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <CircularProgress size={20} />
-            <Typography>Updating bracket...</Typography>
-          </Box>
         </Alert>
       )}
 
@@ -485,9 +351,9 @@ const TournamentPage = () => {
 
       <Box my={3}>
         <Typography variant="h5" gutterBottom>
-          Bracket
+          Tournament Bracket
         </Typography>
-        {tournament.status === "REGISTRATION_OPEN" ? (
+        {!canViewBracket() ? (
           <Alert
             severity="info"
             sx={{ bgcolor: "rgba(255,255,255,0.1)", color: "white" }}
@@ -495,14 +361,35 @@ const TournamentPage = () => {
             Bracket will be available after registrations are locked.
           </Alert>
         ) : (
-          <Bracket
-            phases={tournament.phases || []}
-            matchesByPhase={matchesByPhase || tournament.matchesByPhase || []}
-            participants={tournament.teams || []}
-            organizerMode={isOrganizer}
-            onBracketUpdate={handleBracketUpdate}
-            tournament={tournament}
-          />
+          <Paper
+            elevation={2}
+            sx={{
+              p: 3,
+              bgcolor: "rgba(255,255,255,0.05)",
+              textAlign: "center",
+            }}
+          >
+            <Typography variant="h6" gutterBottom>
+              View Tournament Bracket
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 3, opacity: 0.8 }}>
+              See the full tournament bracket with all matches and progression
+            </Typography>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<AccountTreeIcon />}
+              component={RouterLink}
+              to={`/tournaments/${id}/bracket`}
+              sx={{
+                px: 4,
+                py: 1.5,
+                fontSize: "1.1rem",
+              }}
+            >
+              View Bracket
+            </Button>
+          </Paper>
         )}
       </Box>
 
@@ -566,7 +453,7 @@ const TournamentPage = () => {
                 try {
                   await axios.delete(
                     `/tournaments/${id}/referees/${currentUser._id}`
-                  ); // ✅ Using api instead of axios
+                  );
                   setSuccessMessage("You have quit as referee");
                   await refresh();
                 } catch (err) {
@@ -582,7 +469,6 @@ const TournamentPage = () => {
         )}
       </Box>
 
-      {/* Join Team Modal */}
       <JoinTeamDialog
         open={joinTeamModalOpen}
         onClose={() => {
@@ -596,7 +482,6 @@ const TournamentPage = () => {
         loading={joinTeamLoading}
       />
 
-      {/* Manage Teams Modal */}
       <ManageTeams
         open={manageTeamsModalOpen}
         onClose={() => setManageTeamsModalOpen(false)}

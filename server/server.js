@@ -15,6 +15,7 @@ const authRoutes = require("./routes/authRoutes");
 const oauthRoutes = require("./routes/oauthRoutes");
 const teamRoutes = require("./routes/teamRoutes");
 const scrimRoutes = require("./routes/scrimRoutes");
+const tournamentRoutes = require("./routes/tournamentRoutes");
 const seedGames = require("./config/dbSeeder");
 
 const app = express();
@@ -22,6 +23,8 @@ const PORT = process.env.PORT || 4444;
 let cleanupTask = null;
 
 const SCRIM_RETENTION_DAYS = parseInt(process.env.SCRIM_RETENTION_DAYS) || 90;
+const TOURNAMENT_RETENTION_DAYS =
+  parseInt(process.env.TOURNAMENT_RETENTION_DAYS) || 365;
 
 class OrphanedCleanup {
   static async cleanup(options = { dryRun: false, verbose: false }) {
@@ -29,9 +32,12 @@ class OrphanedCleanup {
     const results = {
       orphanedTeams: [],
       orphanedScrims: [],
+      orphanedTournaments: [],
+      orphanedMatches: [],
       cleanedNotifications: 0,
       cleanedChats: 0,
       cleanedOldScrims: 0,
+      cleanedOldTournaments: 0,
       errors: [],
     };
 
@@ -39,6 +45,7 @@ class OrphanedCleanup {
       console.log("🧹 Starting cleanup...");
       console.log(`📋 Mode: ${dryRun ? "DRY RUN" : "LIVE CLEANUP"}`);
       console.log(`📅 Scrim retention: ${SCRIM_RETENTION_DAYS} days`);
+      console.log(`🏆 Tournament retention: ${TOURNAMENT_RETENTION_DAYS} days`);
     }
 
     try {
@@ -48,7 +55,17 @@ class OrphanedCleanup {
       const Notification = require("./models/Notification");
       const ScrimChat = require("./models/ScrimChat");
 
-      // 1. Clean orphaned teams (no valid owner or members)
+      let Tournament, Match;
+      try {
+        Tournament = require("./models/Tournament");
+        Match = require("./models/Match");
+      } catch (error) {
+        if (verbose)
+          console.log(
+            "ℹ️ Tournament models not found, skipping tournament cleanup"
+          );
+      }
+
       const teams = await Team.find({})
         .populate("owner", "_id")
         .populate("members.user", "_id");
@@ -93,6 +110,18 @@ class OrphanedCleanup {
               { $pull: { requests: team._id } }
             );
 
+            if (Tournament) {
+              await Tournament.updateMany(
+                { teams: team._id },
+                { $pull: { teams: team._id } }
+              );
+
+              await Tournament.updateMany(
+                { pendingTeams: team._id },
+                { $pull: { pendingTeams: team._id } }
+              );
+            }
+
             await Team.findByIdAndDelete(team._id);
           }
 
@@ -106,7 +135,6 @@ class OrphanedCleanup {
         }
       }
 
-      // 2. Clean orphaned scrims (teamA deleted - posting team)
       const scrims = await Scrim.find({})
         .populate("teamA", "_id name")
         .populate("teamB", "_id name");
@@ -165,7 +193,119 @@ class OrphanedCleanup {
         }
       }
 
-      // 3. Clean old scrims and all related data (90+ days old)
+      if (Tournament) {
+        const tournaments = await Tournament.find({})
+          .populate("organizer", "_id")
+          .populate("referees", "_id");
+
+        for (const tournament of tournaments) {
+          let isOrphaned = false;
+          let reason = "";
+
+          if (!tournament.organizer) {
+            isOrphaned = true;
+            reason = "Organizer deleted";
+          }
+
+          if (isOrphaned) {
+            results.orphanedTournaments.push({
+              tournamentId: tournament._id,
+              tournamentName: tournament.name,
+              reason: reason,
+              status: tournament.status,
+            });
+
+            if (!dryRun) {
+              if (Match) {
+                await Match.deleteMany({ tournament: tournament._id });
+              }
+
+              await Tournament.findByIdAndDelete(tournament._id);
+            }
+
+            if (verbose) {
+              console.log(
+                `🗑️ ${dryRun ? "Found" : "Deleted"} orphaned tournament: ${
+                  tournament.name
+                } (${reason})`
+              );
+            }
+          } else {
+            if (tournament.referees && tournament.referees.length > 0) {
+              const validReferees = tournament.referees.filter(
+                (ref) => ref._id
+              );
+
+              if (
+                validReferees.length < tournament.referees.length &&
+                !dryRun
+              ) {
+                tournament.referees = validReferees.map((ref) => ref._id);
+                await tournament.save();
+                if (verbose) {
+                  console.log(
+                    `🧹 Cleaned deleted referees from tournament: ${tournament.name}`
+                  );
+                }
+              }
+            }
+          }
+        }
+
+        if (Match) {
+          const orphanedMatches = await Match.find({}).populate(
+            "tournament",
+            "_id"
+          );
+
+          for (const match of orphanedMatches) {
+            if (!match.tournament) {
+              results.orphanedMatches.push({
+                matchId: match._id,
+                reason: "Tournament deleted",
+              });
+
+              if (!dryRun) {
+                await Match.findByIdAndDelete(match._id);
+              }
+
+              if (verbose) {
+                console.log(
+                  `🗑️ ${dryRun ? "Found" : "Deleted"} orphaned match: ${
+                    match._id
+                  }`
+                );
+              }
+            }
+          }
+        }
+
+        const tournamentCutoff = new Date(
+          Date.now() - TOURNAMENT_RETENTION_DAYS * 24 * 60 * 60 * 1000
+        );
+
+        const oldTournaments = await Tournament.find({
+          createdAt: { $lt: tournamentCutoff },
+          status: "COMPLETE",
+        });
+
+        if (!dryRun) {
+          for (const tournament of oldTournaments) {
+            if (Match) {
+              await Match.deleteMany({ tournament: tournament._id });
+            }
+          }
+
+          const deletedOldTournaments = await Tournament.deleteMany({
+            createdAt: { $lt: tournamentCutoff },
+            status: "COMPLETE",
+          });
+          results.cleanedOldTournaments = deletedOldTournaments.deletedCount;
+        } else {
+          results.cleanedOldTournaments = oldTournaments.length;
+        }
+      }
+
       const scrimCutoff = new Date(
         Date.now() - SCRIM_RETENTION_DAYS * 24 * 60 * 60 * 1000
       );
@@ -188,7 +328,6 @@ class OrphanedCleanup {
         results.cleanedOldScrims = oldScrims.length;
       }
 
-      // 4. Clean any remaining orphaned notifications and chats (safety net)
       if (!dryRun) {
         const orphanedNotifications = await Notification.deleteMany({
           scrim: { $exists: false },
@@ -206,7 +345,16 @@ class OrphanedCleanup {
         console.log("📊 Cleanup Results:");
         console.log(`   • Orphaned Teams: ${results.orphanedTeams.length}`);
         console.log(`   • Orphaned Scrims: ${results.orphanedScrims.length}`);
-        console.log(`   • Old Scrims (90+ days): ${results.cleanedOldScrims}`);
+        console.log(
+          `   • Orphaned Tournaments: ${results.orphanedTournaments.length}`
+        );
+        console.log(`   • Orphaned Matches: ${results.orphanedMatches.length}`);
+        console.log(
+          `   • Old Scrims (${SCRIM_RETENTION_DAYS}+ days): ${results.cleanedOldScrims}`
+        );
+        console.log(
+          `   • Old Tournaments (${TOURNAMENT_RETENTION_DAYS}+ days): ${results.cleanedOldTournaments}`
+        );
         console.log(
           `   • Orphaned Notifications: ${results.cleanedNotifications}`
         );
@@ -241,7 +389,10 @@ const startCleanupScheduler = () => {
         const totalCleaned =
           results.orphanedTeams.length +
           results.orphanedScrims.length +
-          results.cleanedOldScrims;
+          results.orphanedTournaments.length +
+          results.orphanedMatches.length +
+          results.cleanedOldScrims +
+          results.cleanedOldTournaments;
 
         if (totalCleaned > 0) {
           console.log(
@@ -264,6 +415,7 @@ const startCleanupScheduler = () => {
 
   console.log("🕐 Cleanup scheduler started - daily at 2:00 AM UTC");
   console.log(`📅 Scrim retention: ${SCRIM_RETENTION_DAYS} days`);
+  console.log(`🏆 Tournament retention: ${TOURNAMENT_RETENTION_DAYS} days`);
 };
 
 const gracefulShutdown = (signal) => {
@@ -350,7 +502,6 @@ app.use(
 
 app.use(cookieParser());
 
-// Session middleware for OAuth (must be before passport)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || process.env.JWT_SECRET,
@@ -358,18 +509,17 @@ app.use(
     saveUninitialized: false,
     store: MongoStore.create({
       mongoUrl: process.env.MONGO_URI || "mongodb://localhost:27017/challenger",
-      touchAfter: 24 * 3600, // lazy session update
+      touchAfter: 24 * 3600,
     }),
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 24 * 60 * 60 * 1000,
       sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
     },
   })
 );
 
-// Initialize passport after session
 const passport = require("./config/passport");
 app.use(passport.initialize());
 app.use(passport.session());
@@ -444,6 +594,7 @@ app.get("/health", async (req, res) => {
       isScheduled: !!cleanupTask,
       schedule: "Daily at 2:00 AM UTC",
       scrimRetentionDays: SCRIM_RETENTION_DAYS,
+      tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
     };
 
     healthCheck.oauthProviders = {
@@ -462,27 +613,35 @@ app.get("/health", async (req, res) => {
   }
 
   try {
-    const [
-      usersCount,
-      teamsCount,
-      scrimsCount,
-      notificationsCount,
-      chatsCount,
-    ] = await Promise.all([
+    const countPromises = [
       mongoose.model("User").countDocuments(),
       mongoose.model("Team").countDocuments(),
       mongoose.model("Scrim").countDocuments(),
       mongoose.model("Notification").countDocuments(),
       mongoose.model("ScrimChat").countDocuments(),
-    ]);
+    ];
+
+    try {
+      const Tournament = require("./models/Tournament");
+      const Match = require("./models/Match");
+      countPromises.push(Tournament.countDocuments());
+      countPromises.push(Match.countDocuments());
+    } catch (error) {}
+
+    const counts = await Promise.all(countPromises);
 
     healthCheck.database = {
-      users: usersCount,
-      teams: teamsCount,
-      scrims: scrimsCount,
-      notifications: notificationsCount,
-      chatMessages: chatsCount,
+      users: counts[0],
+      teams: counts[1],
+      scrims: counts[2],
+      notifications: counts[3],
+      chatMessages: counts[4],
     };
+
+    if (counts.length > 5) {
+      healthCheck.database.tournaments = counts[5];
+      healthCheck.database.matches = counts[6];
+    }
   } catch (error) {
     healthCheck.database = { error: "Failed to get counts" };
   }
@@ -512,30 +671,38 @@ app.get("/health", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
+  const features = [
+    "Cookie-based authentication",
+    "OAuth integration (Google, Discord, Twitch)",
+    "Cloudinary file storage",
+    "Rate limiting",
+    "Security headers",
+    "Auto token refresh",
+    "Automatic data cleanup",
+    "Tournament management",
+    "Match tracking",
+  ];
+
+  const endpoints = [
+    "/api/auth",
+    "/api/auth/google",
+    "/api/auth/discord",
+    "/api/auth/twitch",
+    "/api/teams",
+    "/api/scrims",
+    "/api/tournaments",
+    "/api/teams/games",
+    "/api/cleanup",
+    "/health",
+  ];
+
   res.json({
     message: "Challenger API is running!",
-    version: "2.1.0",
-    features: [
-      "Cookie-based authentication",
-      "OAuth integration (Google, Discord, Twitch)",
-      "Cloudinary file storage",
-      "Rate limiting",
-      "Security headers",
-      "Auto token refresh",
-      "Automatic data cleanup",
-    ],
-    endpoints: [
-      "/api/auth",
-      "/api/auth/google",
-      "/api/auth/discord",
-      "/api/auth/twitch",
-      "/api/teams",
-      "/api/scrims",
-      "/api/teams/games",
-      "/api/cleanup",
-      "/health",
-    ],
+    version: "2.2.0",
+    features,
+    endpoints,
     scrimRetentionDays: SCRIM_RETENTION_DAYS,
+    tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
   });
 });
 
@@ -551,6 +718,7 @@ app.get("/api/test", (req, res) => {
       security: true,
       compression: true,
       cleanup: !!cleanupTask,
+      tournaments: true,
       oauth: {
         google: !!(
           process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
@@ -564,6 +732,7 @@ app.get("/api/test", (req, res) => {
       },
     },
     scrimRetentionDays: SCRIM_RETENTION_DAYS,
+    tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
   });
 });
 
@@ -591,11 +760,11 @@ app.get("/api/seed-games", async (req, res) => {
   }
 });
 
-// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", oauthRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/scrims", scrimRoutes);
+app.use("/api/tournaments", tournamentRoutes);
 
 app.get("/api/cleanup/status", async (req, res) => {
   try {
@@ -604,6 +773,7 @@ app.get("/api/cleanup/status", async (req, res) => {
       schedule: "Daily at 2:00 AM UTC",
       lastRun: "Check server logs",
       scrimRetentionDays: SCRIM_RETENTION_DAYS,
+      tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
     };
     res.json({ success: true, data: status });
   } catch (error) {
@@ -624,6 +794,7 @@ app.post("/api/cleanup/dry-run", async (req, res) => {
       message: "Dry run completed - no changes made",
       data: results,
       scrimRetentionDays: SCRIM_RETENTION_DAYS,
+      tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
     });
   } catch (error) {
     res.status(500).json({
@@ -645,6 +816,7 @@ app.post("/api/cleanup/run", async (req, res) => {
       message: "Manual cleanup completed",
       data: results,
       scrimRetentionDays: SCRIM_RETENTION_DAYS,
+      tournamentRetentionDays: TOURNAMENT_RETENTION_DAYS,
     });
   } catch (error) {
     res.status(500).json({
@@ -730,30 +902,37 @@ app.use((err, req, res, next) => {
 app.use("*", (req, res) => {
   console.log(`🔍 404 - Route not found: ${req.method} ${req.originalUrl}`);
 
+  const availableEndpoints = [
+    "GET /",
+    "GET /health",
+    "GET /api/test",
+    "GET /api/games",
+    "GET /api/cleanup/status",
+    "POST /api/cleanup/dry-run",
+    "POST /api/cleanup/run",
+    "POST /api/auth/login",
+    "POST /api/auth/signup",
+    "POST /api/auth/logout",
+    "POST /api/auth/refresh",
+    "DELETE /api/auth/delete-account",
+    "GET /api/auth/me",
+    "GET /api/auth/google",
+    "GET /api/auth/discord",
+    "GET /api/auth/twitch",
+    "GET /api/auth/linked-accounts",
+    "DELETE /api/auth/unlink/:provider",
+    "GET /api/teams/my",
+    "GET /api/tournaments",
+    "POST /api/tournaments",
+    "GET /api/tournaments/:id",
+    "PUT /api/tournaments/:id",
+    "DELETE /api/tournaments/:id",
+  ];
+
   res.status(404).json({
     success: false,
     message: `API endpoint not found: ${req.method} ${req.originalUrl}`,
-    availableEndpoints: [
-      "GET /",
-      "GET /health",
-      "GET /api/test",
-      "GET /api/games",
-      "GET /api/cleanup/status",
-      "POST /api/cleanup/dry-run",
-      "POST /api/cleanup/run",
-      "POST /api/auth/login",
-      "POST /api/auth/signup",
-      "POST /api/auth/logout",
-      "POST /api/auth/refresh",
-      "DELETE /api/auth/delete-account",
-      "GET /api/auth/me",
-      "GET /api/auth/google",
-      "GET /api/auth/discord",
-      "GET /api/auth/twitch",
-      "GET /api/auth/linked-accounts",
-      "DELETE /api/auth/unlink/:provider",
-      "GET /api/teams/my",
-    ],
+    availableEndpoints,
   });
 });
 
@@ -776,7 +955,9 @@ const server = app.listen(PORT, () => {
   console.log(`🔐 Authentication: Cookie-based + OAuth`);
   console.log(`☁️ File Storage: Cloudinary`);
   console.log(`🛡️ Security: Enabled`);
-  console.log(`🧹 Cleanup: Enabled (${SCRIM_RETENTION_DAYS} day retention)`);
+  console.log(
+    `🧹 Cleanup: Enabled (${SCRIM_RETENTION_DAYS} day scrim retention, ${TOURNAMENT_RETENTION_DAYS} day tournament retention)`
+  );
   console.log("📍 Registered routes:");
   console.log("   • Auth routes: /api/auth");
   console.log(
@@ -784,6 +965,7 @@ const server = app.listen(PORT, () => {
   );
   console.log("   • Team routes: /api/teams");
   console.log("   • Scrim routes: /api/scrims");
+  console.log("   • Tournament routes: /api/tournaments");
   console.log("   • Cleanup routes: /api/cleanup");
   console.log("   • Games route: /api/games");
   console.log("   • Health check: /health");

@@ -412,18 +412,27 @@ router.post("/refresh", async (req, res) => {
     const { refreshToken } = req.cookies;
 
     if (!refreshToken) {
-      return sendErrorResponse(res, 401, "Refresh token not provided");
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token not provided",
+        code: "NO_REFRESH_TOKEN",
+      });
     }
 
     const decoded = jwt.verify(
       refreshToken,
       process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
     );
+
     const user = await User.findById(decoded.userId).select("-password");
 
     if (!user) {
       clearAuthCookies(res);
-      return sendErrorResponse(res, 401, "User not found");
+      return res.status(401).json({
+        success: false,
+        message: "User not found",
+        code: "USER_NOT_FOUND",
+      });
     }
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(
@@ -445,7 +454,28 @@ router.post("/refresh", async (req, res) => {
   } catch (error) {
     console.error("Token refresh error:", error);
     clearAuthCookies(res);
-    sendErrorResponse(res, 401, "Invalid refresh token");
+
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token expired",
+        code: "REFRESH_TOKEN_EXPIRED",
+      });
+    }
+
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+        code: "INVALID_REFRESH_TOKEN",
+      });
+    }
+
+    res.status(401).json({
+      success: false,
+      message: "Token refresh failed",
+      code: "REFRESH_FAILED",
+    });
   }
 });
 

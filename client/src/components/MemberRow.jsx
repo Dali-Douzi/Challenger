@@ -20,6 +20,7 @@ const MemberRow = ({
 }) => {
   const { user, makeAuthenticatedRequest } = useContext(AuthContext);
   const [loading, setLoading] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
 
   const handleRankChange = async (newRank) => {
     setLoading(true);
@@ -129,20 +130,52 @@ const MemberRow = ({
     }
   };
 
-  // Build the full avatar URL; member.user.avatar is stored as "/uploads/avatars/<filename>"
-  const avatarUrl = member.user.avatar
-    ? `http://localhost:4444${member.user.avatar}`
-    : "";
+  const avatarUrl =
+    member.user.avatar && !avatarError ? member.user.avatar : "";
+
+  const getUserInitials = (username) => {
+    if (!username) return "?";
+    const names = username.trim().split(/\s+/);
+    if (names.length === 1) {
+      return names[0][0].toUpperCase();
+    }
+    return names
+      .slice(0, 2)
+      .map((name) => name[0].toUpperCase())
+      .join("");
+  };
+
+  const handleAvatarError = () => {
+    setAvatarError(true);
+  };
 
   return (
     <ListItem divider sx={{ display: "flex", alignItems: "center" }}>
       <ListItemAvatar>
-        <Avatar src={avatarUrl} alt={member.user.username}>
-          {member.user.username[0].toUpperCase()}
+        <Avatar
+          src={avatarUrl}
+          alt={member.user.username}
+          onError={handleAvatarError}
+          sx={{
+            width: 40,
+            height: 40,
+            bgcolor: avatarUrl ? "transparent" : "primary.main",
+            fontSize: "1rem",
+            fontWeight: "bold",
+          }}
+        >
+          {getUserInitials(member.user.username)}
         </Avatar>
       </ListItemAvatar>
 
-      <ListItemText primary={member.user.username} />
+      <ListItemText
+        primary={member.user.username}
+        sx={{
+          "& .MuiListItemText-primary": {
+            fontWeight: 500,
+          },
+        }}
+      />
 
       {loading ? (
         <CircularProgress size={20} sx={{ ml: "auto" }} />

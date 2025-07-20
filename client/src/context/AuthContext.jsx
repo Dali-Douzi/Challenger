@@ -68,10 +68,20 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
+  // Get the correct API base URL
+  const getApiBaseUrl = () => {
+    if (process.env.NODE_ENV === "production") {
+      return window.location.origin;
+    }
+    return "http://localhost:4444";
+  };
+
   // Make authenticated API calls with credentials (cookies)
   const makeAuthenticatedRequest = async (url, options = {}) => {
     try {
-      const response = await fetch(url, {
+      const fullUrl = url.startsWith("http") ? url : `${getApiBaseUrl()}${url}`;
+
+      const response = await fetch(fullUrl, {
         ...options,
         credentials: "include", // Include cookies
         headers: {
@@ -85,11 +95,16 @@ export const AuthProvider = ({ children }) => {
         const errorData = await response.json();
 
         // If it's a token expiry issue, try to refresh
-        if (errorData.code === "TOKEN_EXPIRED") {
+        if (
+          errorData.code === "TOKEN_EXPIRED" ||
+          errorData.message?.includes("expired")
+        ) {
+          console.log("Token expired, attempting refresh...");
           const refreshResult = await refreshToken();
           if (refreshResult.success) {
             // Retry the original request
-            return fetch(url, {
+            console.log("Token refreshed successfully, retrying request...");
+            return fetch(fullUrl, {
               ...options,
               credentials: "include",
               headers: {
@@ -101,6 +116,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         // If refresh fails or other auth issues, logout
+        console.log("Authentication failed, logging out...");
         logout();
         throw new Error("Authentication failed");
       }
@@ -112,10 +128,27 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Check authentication status
-  const checkAuthStatus = async () => {
+  // Helper function to check if we have any auth cookies
+  const hasAuthCookies = () => {
+    return (
+      document.cookie.includes("accessToken") ||
+      document.cookie.includes("refreshToken")
+    );
+  };
+
+  // Check authentication status with retry logic
+  const checkAuthStatus = async (retryCount = 0) => {
+    const maxRetries = 1; // Reduced retries
+
     try {
-      const response = await fetch("/api/auth/me", {
+      // If no auth cookies exist, skip the auth check entirely
+      if (!hasAuthCookies() && retryCount === 0) {
+        dispatch({ type: "LOGOUT" });
+        dispatch({ type: "SET_LOADING", payload: false });
+        return;
+      }
+
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, {
         credentials: "include",
       });
 
@@ -126,19 +159,57 @@ export const AuthProvider = ({ children }) => {
             type: "SET_AUTH_DATA",
             payload: { user: data.user },
           });
+          return;
         }
       }
+
+      // If we get a 401 and have cookies, try to refresh the token
+      if (
+        response.status === 401 &&
+        hasAuthCookies() &&
+        retryCount < maxRetries
+      ) {
+        const refreshResult = await refreshToken();
+
+        if (refreshResult.success) {
+          // Retry the auth check
+          return checkAuthStatus(retryCount + 1);
+        }
+      }
+
+      // If we can't authenticate, clear the auth state
+      dispatch({ type: "LOGOUT" });
     } catch (error) {
-      console.error("Auth check error:", error);
+      // Only log errors if we actually have cookies (meaning user should be authenticated)
+      if (hasAuthCookies()) {
+        console.error("Auth check error:", error);
+      }
+
+      // On network errors with auth cookies, retry once
+      if (hasAuthCookies() && retryCount < 1) {
+        setTimeout(() => checkAuthStatus(retryCount + 1), 1000);
+        return;
+      }
+
+      // Final fallback - set as not authenticated
+      dispatch({ type: "LOGOUT" });
     } finally {
-      dispatch({ type: "SET_LOADING", payload: false });
+      // Only set loading to false on the final attempt
+      if (retryCount >= maxRetries || retryCount === 0) {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
     }
   };
 
   // Refresh access token
   const refreshToken = async () => {
     try {
-      const response = await fetch("/api/auth/refresh", {
+      // Check if we have a refresh token before attempting refresh
+      if (!hasAuthCookies()) {
+        return { success: false, reason: "No auth cookies" };
+      }
+
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/refresh`, {
         method: "POST",
         credentials: "include",
       });
@@ -153,17 +224,20 @@ export const AuthProvider = ({ children }) => {
         return { success: true };
       }
 
-      return { success: false };
+      return { success: false, reason: "Refresh failed" };
     } catch (error) {
-      console.error("Token refresh error:", error);
-      return { success: false };
+      // Only log refresh errors if we have cookies (meaning refresh should work)
+      if (hasAuthCookies()) {
+        console.error("Token refresh error:", error);
+      }
+      return { success: false, reason: error.message };
     }
   };
 
   // Login function
   const login = async (identifier, password, rememberMe = false) => {
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -194,7 +268,7 @@ export const AuthProvider = ({ children }) => {
   // Signup function
   const signup = async (formData) => {
     try {
-      const response = await fetch("/api/auth/signup", {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/signup`, {
         method: "POST",
         credentials: "include",
         body: formData, // FormData for file upload
@@ -222,7 +296,7 @@ export const AuthProvider = ({ children }) => {
   // Logout function
   const logout = async () => {
     try {
-      await fetch("/api/auth/logout", {
+      await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
@@ -233,8 +307,12 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const updateUser = (updatedUser) => {
-    dispatch({ type: "UPDATE_USER", payload: updatedUser });
+  // Direct auth state setter (for OAuth callbacks)
+  const setAuthData = (userData) => {
+    dispatch({
+      type: "SET_AUTH_DATA",
+      payload: { user: userData },
+    });
   };
 
   const updateUsername = async (newUsername, currentPassword) => {
@@ -316,12 +394,15 @@ export const AuthProvider = ({ children }) => {
       formData.append("avatar", avatarFile);
 
       // Use fetch directly instead of makeAuthenticatedRequest for FormData
-      const response = await fetch("/api/auth/change-avatar", {
-        method: "PUT",
-        credentials: "include", // Include cookies for authentication
-        body: formData,
-        // Don't set Content-Type header - let browser set it with boundary
-      });
+      const response = await fetch(
+        `${getApiBaseUrl()}/api/auth/change-avatar`,
+        {
+          method: "PUT",
+          credentials: "include", // Include cookies for authentication
+          body: formData,
+          // Don't set Content-Type header - let browser set it with boundary
+        }
+      );
 
       const data = await handleApiResponse(response);
 
@@ -370,6 +451,10 @@ export const AuthProvider = ({ children }) => {
     return state.isAuthenticated && state.user;
   };
 
+  const updateUser = (updatedUser) => {
+    dispatch({ type: "UPDATE_USER", payload: updatedUser });
+  };
+
   const value = {
     // State
     user: state.user,
@@ -389,6 +474,7 @@ export const AuthProvider = ({ children }) => {
     deleteAvatar,
     refreshToken,
     checkAuthStatus,
+    setAuthData, // Add the direct setter
 
     // Utilities
     makeAuthenticatedRequest,

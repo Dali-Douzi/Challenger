@@ -8,6 +8,8 @@ import {
   ListItem,
   ListItemButton,
   ListItemText,
+  ListItemAvatar,
+  Avatar,
   CircularProgress,
   Container,
   Paper,
@@ -32,7 +34,6 @@ const TeamDashboard = () => {
       );
       if (res && res.ok) {
         const data = await res.json();
-        // Ensure data is always an array
         const teamsArray = Array.isArray(data) ? data : [];
         setTeams(teamsArray);
       } else if (res) {
@@ -42,13 +43,12 @@ const TeamDashboard = () => {
     } catch (err) {
       console.error("Error fetching teams:", err);
       setError("Error fetching your teams");
-      setTeams([]); // Set to empty array on error
+      setTeams([]);
     } finally {
       setLoading(false);
     }
   }, [makeAuthenticatedRequest]);
 
-  // Initial load
   useEffect(() => {
     fetchTeams();
   }, [fetchTeams]);
@@ -65,9 +65,18 @@ const TeamDashboard = () => {
     setIsModalOpen(false);
   };
 
-  // Called by JoinTeamModal on successful join
   const onJoinSuccess = () => {
     fetchTeams();
+  };
+
+  const getTeamInitials = (teamName) => {
+    if (typeof teamName !== "string" || !teamName.trim()) return "";
+    return teamName
+      .trim()
+      .split(/\s+/)
+      .map((word) => word[0].toUpperCase())
+      .slice(0, 2)
+      .join("");
   };
 
   if (loading) {
@@ -114,6 +123,21 @@ const TeamDashboard = () => {
               {teams.map((team) => (
                 <ListItem key={team._id} disablePadding divider>
                   <ListItemButton component="a" href={`/teams/${team._id}`}>
+                    <ListItemAvatar>
+                      <Avatar
+                        src={team.logo || ""}
+                        alt={team.name}
+                        sx={{
+                          width: 48,
+                          height: 48,
+                          bgcolor: team.logo ? "transparent" : "primary.main",
+                          fontSize: "1.2rem",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {!team.logo && getTeamInitials(team.name)}
+                      </Avatar>
+                    </ListItemAvatar>
                     <ListItemText
                       primary={team.name}
                       secondary={`Game: ${

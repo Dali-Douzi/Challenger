@@ -11,7 +11,6 @@ import {
   Link,
   Container,
   Divider,
-  IconButton,
 } from "@mui/material";
 import { Google } from "@mui/icons-material";
 import { ThemeProvider } from "@mui/material/styles";
@@ -46,7 +45,7 @@ const TwitchIcon = () => (
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, isLoading, user } = useAuth(); // Added user here
 
   const [formData, setFormData] = useState({
     identifier: "",
@@ -56,35 +55,24 @@ const LoginPage = () => {
     identifier: "",
     password: "",
   });
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmittingLogin, setIsSubmittingLogin] = useState(false); // Renamed to avoid conflict
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
 
+  // Get the correct API base URL
+  const getApiBaseUrl = () => {
+    if (process.env.NODE_ENV === "production") {
+      return window.location.origin;
+    }
+    return "http://localhost:4444";
+  };
+
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isLoading) {
       navigate("/dashboard");
     }
-  }, [isAuthenticated, navigate]);
-
-  // Check for OAuth callback messages
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const oauthMessage = urlParams.get("message");
-    const oauthError = urlParams.get("error");
-
-    if (oauthMessage) {
-      setMessage(oauthMessage);
-      setMessageType("success");
-      // Clear URL params
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (oauthError) {
-      setMessage(oauthError);
-      setMessageType("error");
-      // Clear URL params
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []);
+  }, [isAuthenticated, isLoading, navigate]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -119,7 +107,7 @@ const LoginPage = () => {
   const handleSubmit = async () => {
     if (!validateForm()) return;
 
-    setIsLoading(true);
+    setIsSubmittingLogin(true); // Updated variable name
     setMessage("");
 
     try {
@@ -142,7 +130,7 @@ const LoginPage = () => {
       setMessageType("error");
       console.error("Login error:", error);
     } finally {
-      setIsLoading(false);
+      setIsSubmittingLogin(false); // Updated variable name
     }
   };
 
@@ -153,8 +141,8 @@ const LoginPage = () => {
   };
 
   const handleOAuthLogin = (provider) => {
-    // Redirect to OAuth endpoint
-    const apiUrl = "http://localhost:4444";
+    // Redirect to OAuth endpoint with proper URL construction
+    const apiUrl = getApiBaseUrl();
     window.location.href = `${apiUrl}/api/auth/${provider}`;
   };
 
@@ -324,7 +312,7 @@ const LoginPage = () => {
                 fullWidth
                 variant="contained"
                 onClick={handleSubmit}
-                disabled={isLoading}
+                disabled={isSubmittingLogin} // Updated variable name
                 sx={{
                   py: 1.5,
                   mt: 2,
@@ -332,7 +320,7 @@ const LoginPage = () => {
                   fontWeight: "medium",
                 }}
               >
-                {isLoading ? (
+                {isSubmittingLogin ? ( // Updated variable name
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <CircularProgress size={20} color="inherit" />
                     Signing in...

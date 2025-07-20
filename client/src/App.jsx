@@ -20,8 +20,7 @@ import TeamDashboard from "./pages/TeamDashboard";
 import TournamentDashboard from "./pages/TournamentDashboard";
 import CreateTeam from "./pages/CreateTeam";
 import TeamProfile from "./pages/TeamProfile";
-import AuthSuccess from "./pages/AuthSuccess";
-import AuthError from "./pages/AuthError";
+import OAuthCallback from "./components/OAuthCallback";
 
 const PublicRoute = ({ children }) => {
   const token = sessionStorage.getItem("token");
@@ -55,9 +54,9 @@ const App = () => {
               }
             />
 
-            <Route path="/auth/success" element={<AuthSuccess />} />
+            <Route path="/auth/success" element={<OAuthCallback />} />
 
-            <Route path="/auth/error" element={<AuthError />} />
+            <Route path="/auth/error" element={<OAuthCallback />} />
 
             <Route
               path="/dashboard"
